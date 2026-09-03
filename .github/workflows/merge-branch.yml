@@ -1,0 +1,83 @@
+# IMPORTANT: secrets.CICD_GITHUB_TOKEN must be newly generated every year.
+# One year is the longest expiration time that can be chosen for custom access tokens.
+# Secrets are set here for the Org: https://github.com/organizations/adadaptedinc/settings/secrets/actions
+# Fine-grained tokens can be generated here: https://github.com/settings/tokens?type=beta
+#   - Expiration: 1 year out
+#   - Resource Owner: adadaptedinc
+#   - Repository Access: All Repositories
+#   - Permissions:
+#       - Repository Permissions:
+#           - Actions: Read and Write
+#           - Contents: Read and Write
+#       - Organization Permissions: none
+
+name: Merge Branch
+on:
+    pull_request:
+        branches: [main]
+        types:
+            - opened
+            - reopened
+            - synchronize
+    push:
+        branches:
+            - "**"
+        tags-ignore:
+            - "**"
+permissions:
+    contents: read
+jobs:
+    validation:
+        name: validation # Used for a Github environment protection ruleset. The name must be the same for the ruleset to work.
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+              with:
+                  ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
+            - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+              with:
+                  channel: stable
+                  cache: true
+            - name: Flutter Install
+              run: flutter pub get
+            - name: Flutter Install (example app)
+              run: flutter pub get
+              working-directory: example
+            - name: Format Validation
+              run: dart format --output=none --set-exit-if-changed .
+            - name: Linting Validation
+              run: flutter analyze
+            - name: Linting Validation (example app)
+              run: flutter analyze
+              working-directory: example
+            # The version the SDK reports to the API is a constant, because Dart
+            # has no runtime access to its own pubspec. A mismatch is invisible
+            # at runtime and would ship as SDK version reporting gone stale.
+            - name: Version Validation
+              run: dart run tool/check_version.dart
+            - name: Unit Tests
+              run: flutter test
+    create_release_version:
+        if: ${{ github.event_name == 'push' && github.ref_name == 'main'}}
+        needs: [validation]
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+        outputs:
+            new_tag: ${{steps.tag_version.outputs.new_tag}}
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+              with:
+                  ref: main
+            - name: Bump version and push tag
+              id: tag_version
+              uses: mathieudutour/github-tag-action@a22cf08638b34d5badda920f9daf6e72c477b07b # v6.2
+              with:
+                  github_token: ${{secrets.CICD_GITHUB_TOKEN}}
+            - name: Create a GitHub release
+              uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1
+              with:
+                  token: ${{secrets.CICD_GITHUB_TOKEN}}
+                  tag: ${{steps.tag_version.outputs.new_tag}}
+                  name: Release ${{steps.tag_version.outputs.new_tag}}
+                  body: ${{steps.tag_version.outputs.changelog}}
