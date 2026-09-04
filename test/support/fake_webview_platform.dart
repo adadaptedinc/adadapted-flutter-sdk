@@ -105,9 +105,16 @@ class FakeWebViewController extends PlatformWebViewController {
   /// Tells the SDK the creative failed to render.
   /// @param isForMainFrame - Whether the failure was the main frame. A
   ///      sub-resource failure must not discard a real fill.
-  void failLoad({bool isForMainFrame = true}) {
+  /// @param errorCode - The platform error code. -999 is WebKit's
+  ///      NSURLErrorCancelled, raised when a load is superseded.
+  /// @param url - The URL the failure belongs to, when the platform reports one.
+  void failLoad({bool isForMainFrame = true, int errorCode = -1, String? url}) {
     delegate?.onWebResourceError?.call(
-      FakeWebResourceError(isForMainFrame: isForMainFrame),
+      FakeWebResourceError(
+        isForMainFrame: isForMainFrame,
+        errorCode: errorCode,
+        url: url,
+      ),
     );
   }
 }
@@ -158,13 +165,14 @@ class FakeNavigationDelegate extends PlatformNavigationDelegate {
 class FakeWebResourceError extends WebResourceError {
   /// Creates a fake web resource error.
   /// @param isForMainFrame - Whether the failure was the main frame.
+  /// @param errorCode - The platform error code.
+  /// @param url - The URL the failure belongs to, if any.
   // ignore: prefer_const_constructors_in_immutables
-  FakeWebResourceError({required bool isForMainFrame})
-    : super(
-        errorCode: -1,
-        description: 'fake failure',
-        isForMainFrame: isForMainFrame,
-      );
+  FakeWebResourceError({
+    required bool isForMainFrame,
+    super.errorCode = -1,
+    super.url,
+  }) : super(description: 'fake failure', isForMainFrame: isForMainFrame);
 }
 
 /// Renders nothing, because there is no platform view to embed in a unit test.

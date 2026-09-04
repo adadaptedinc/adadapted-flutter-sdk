@@ -400,8 +400,25 @@ class AdadaptedFlutterSdk {
         }
       }
 
-      // Sort the final results by priority, lowest number first.
-      results.sort((a, b) => a.priority.compareTo(b.priority));
+      // A total order, so the same matches come back in the same sequence on
+      // every platform and every call.
+      //
+      // Priority alone is not one: every term the sandbox serves has priority
+      // 5, and `List.sort` is only stable below 32 elements (it insertion-sorts
+      // under `_INSERTION_SORT_THRESHOLD`), so ties otherwise fall back to
+      // whatever order /intercept/retrieve happened to return — which is not
+      // specified and did differ between an Android and an iOS run of the demo.
+      results.sort((a, b) {
+        final byPriority = a.priority.compareTo(b.priority);
+
+        if (byPriority != 0) {
+          return byPriority;
+        }
+
+        final byTerm = a.term.toLowerCase().compareTo(b.term.toLowerCase());
+
+        return byTerm != 0 ? byTerm : a.termId.compareTo(b.termId);
+      });
 
       // If there are no events to report at this point, we need to report the
       // "not_matched" event.

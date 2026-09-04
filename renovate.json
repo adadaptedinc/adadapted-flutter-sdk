@@ -1,14 +1,42 @@
 {
     "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-    "extends": ["config:recommended"],
+    "extends": [
+        "config:recommended"
+    ],
     "packageRules": [
         {
-            "matchUpdateTypes": ["minor", "patch"],
+            "description": "Dart and Flutter package updates are covered by analyze and the test suite.",
+            "matchManagers": [
+                "pub"
+            ],
+            "matchUpdateTypes": [
+                "minor",
+                "patch"
+            ],
             "automerge": true
         },
         {
-            "matchUpdateTypes": ["major"],
-            "reviewers": ["jeramyadadapted", "steveadadapted"]
+            "description": "Gradle, Kotlin and CocoaPods updates touch code that only the example's Android build compiles, and nothing in CI compiles the iOS side at all. Keep them in front of a human until that gap is closed.",
+            "matchManagers": [
+                "gradle",
+                "gradle-wrapper",
+                "cocoapods"
+            ],
+            "automerge": false,
+            "reviewers": [
+                "jeramyadadapted",
+                "steveadadapted"
+            ]
+        },
+        {
+            "matchUpdateTypes": [
+                "major"
+            ],
+            "automerge": false,
+            "reviewers": [
+                "jeramyadadapted",
+                "steveadadapted"
+            ]
         }
     ]
 }

@@ -33,6 +33,12 @@ const int minimumAdRefreshSeconds = 15;
 /// zone counts as a tap rather than a scroll.
 const double defaultXyDragDistanceAllowed = 25;
 
+/// `NSURLErrorCancelled`, which WebKit reports when a load is superseded.
+///
+/// Not a render failure: it is what a zone's own next `loadRequest` does to the
+/// load before it.
+const int _urlCancelledErrorCode = -999;
+
 /// Injected into the creative once it has rendered and is on screen, immediately
 /// before the impression is reported. The creative is expected to define this
 /// function; it loads the advertiser's measurement pixels.
@@ -180,9 +186,17 @@ class _AdZoneState extends State<AdZone> {
   /// Whether the countdown is currently running.
   bool _timerRunning = false;
 
-  /// Whether the zone is currently on screen, as measured or as the host
-  /// reported.
-  bool _isVisible = true;
+  /// What the detector has measured, or null when it has not measured yet.
+  ///
+  /// Three states rather than a bool, because "not measured yet" is not the
+  /// same as "off screen" and neither is it "on screen". `visibility_detector`
+  /// never calls back for a widget whose first measurement is off screen —
+  /// `_fireCallback` returns early when `oldInfo == null && !visible` — so a
+  /// zone that mounts below the fold is never heard from until the user
+  /// scrolls to it. Defaulting this to true billed those zones for an
+  /// impression the moment their creative loaded, which is the over-reporting
+  /// the React Native SDK's required `isVisible` prop existed to prevent.
+  bool? _measuredVisibility;
 
   /// Whether the app is currently in the foreground.
   bool _isAppActive = true;
@@ -307,10 +321,6 @@ class _AdZoneState extends State<AdZone> {
     // comparison would see a stale value, queue a refetch on top of a request
     // that was already targeted correctly, and throw that fill away.
     _previousContextId = widget.contextId;
-
-    if (widget.isVisible != null) {
-      _isVisible = widget.isVisible!;
-    }
 
     // A host builds its layout immediately, while initialize() is still
     // gathering device info over the platform channel, so a zone normally mounts
@@ -451,14 +461,14 @@ class _AdZoneState extends State<AdZone> {
   // VISIBILITY
   // ===========================================================================
 
-  /// Records a visibility change and reacts to it.
+  /// Records a measured visibility change and reacts to it.
   /// @param isVisible - Whether the zone is now on screen.
   void _applyVisibility(bool isVisible) {
-    if (_isVisible == isVisible) {
+    if (_measuredVisibility == isVisible) {
       return;
     }
 
-    _isVisible = isVisible;
+    _measuredVisibility = isVisible;
 
     _applyOnScreenChange();
   }
@@ -466,32 +476,84 @@ class _AdZoneState extends State<AdZone> {
   /// Reacts to the zone arriving on or leaving the screen.
   void _applyOnScreenChange() {
     if (_isOnScreen()) {
-      _flushUnfilled();
       _trackImpression();
-      _resumeTimer();
     } else {
       _endImpression();
+    }
+
+    if (_shouldPace()) {
+      _flushUnfilled();
+      _resumeTimer();
+    } else {
       _pauseTimer();
     }
   }
 
-  /// Whether the zone is actually in front of the user right now.
+  /// Whether the zone is confirmed to be in front of the user right now.
   ///
-  /// The countdown, the impression events and the unfilled report all hang off
-  /// this. Mirrors `AdZonePresenter.zoneIsOnScreen`.
+  /// Gates the impression events, so it is deliberately pessimistic: an
+  /// unmeasured zone is not on screen. Mirrors `AdZonePresenter.zoneIsOnScreen`,
+  /// with the measurement standing in for the host's report.
   bool _isOnScreen() {
-    return _isMounted && _isVisible && _isAppActive;
+    if (!_isMounted || !_isAppActive) {
+      return false;
+    }
+
+    final override = widget.isVisible;
+
+    if (override != null) {
+      return override;
+    }
+
+    return _measuredVisibility ?? false;
+  }
+
+  /// Whether the refresh countdown should be running.
+  ///
+  /// Separate from [_isOnScreen] for one case: a zone with no ad renders
+  /// nothing, so it has no size, so it can never be measured. Gating its
+  /// countdown on a measurement it cannot produce leaves it unfilled forever —
+  /// it would not ask for another ad even once the user scrolled to it, because
+  /// scrolling to a zero-height box still measures nothing. So an unfilled zone
+  /// paces regardless, which costs an ad request for a zone nobody is looking
+  /// at and cannot cost a false impression: there is no ad to bill, and by the
+  /// time one arrives the zone occupies space and can be measured for real.
+  bool _shouldPace() {
+    if (!_isMounted || !_isAppActive) {
+      return false;
+    }
+
+    final override = widget.isVisible;
+
+    if (override != null) {
+      return override;
+    }
+
+    if (!_hasRenderableAd) {
+      return true;
+    }
+
+    return _measuredVisibility ?? false;
+  }
+
+  /// Whether the zone currently has an ad that occupies space, and can
+  /// therefore be measured.
+  bool get _hasRenderableAd {
+    final ad = _currentAd;
+
+    return ad != null && ad.creativeUrl.isNotEmpty;
   }
 
   /// Reacts to the measured visibility of the zone changing.
   ///
-  /// An unfilled zone occupies no space, so the measurement it produces is not
-  /// a statement about whether the user can see the slot — it is an artifact of
-  /// there being nothing to see. Acting on it would freeze the countdown of
-  /// every zone the moment it went unfilled, and it would never ask for another
-  /// ad. The last real measurement stands instead, which is correct in both
-  /// directions: a zone that went unfilled while on screen keeps refreshing, and
-  /// one that went unfilled while off screen stays paused.
+  /// A zero-sized measurement says nothing about whether the user can see the
+  /// slot — it is an artifact of there being nothing to measure — so the last
+  /// real measurement stands instead. This is no longer what keeps an unfilled
+  /// zone serving; [_shouldPace] does that, by pacing any zone with nothing to
+  /// render. What it still avoids is a spurious flap: a host that sizes the box
+  /// from `onZoneHasAds` leaves one frame where an ad exists but the box is
+  /// still collapsed, and without this that frame would record the zone as off
+  /// screen and withhold the impression until the next measurement.
   /// @param info - What the detector measured.
   void _onVisibilityInfo(VisibilityInfo info) {
     if (!_isMounted || widget.isVisible != null || info.size.isEmpty) {
@@ -590,7 +652,7 @@ class _AdZoneState extends State<AdZone> {
   void _flushUnfilled() {
     final reason = _pendingUnfilledReason;
 
-    if (reason == null || _unfilledReported || !_isOnScreen()) {
+    if (reason == null || _unfilledReported || !_shouldPace()) {
       return;
     }
 
@@ -638,7 +700,7 @@ class _AdZoneState extends State<AdZone> {
 
   /// Starts the countdown with whatever time it has left.
   void _startTimer() {
-    if (!_loaded || _timerRunning || !_isOnScreen()) {
+    if (!_loaded || _timerRunning || !_shouldPace()) {
       return;
     }
 
@@ -683,7 +745,7 @@ class _AdZoneState extends State<AdZone> {
   /// replaced immediately, rather than being shown for time it never spent in
   /// front of anyone.
   void _resumeTimer() {
-    if (_timerRunning || !_isOnScreen()) {
+    if (_timerRunning || !_shouldPace()) {
       return;
     }
 
@@ -974,9 +1036,35 @@ class _AdZoneState extends State<AdZone> {
             // Main frame only, which is what Android's onReceivedError covers. A
             // sub-resource inside a creative that is otherwise fine must not
             // discard a real fill.
-            if (error.isForMainFrame ?? true) {
-              _onCreativeFailed();
+            if (!(error.isForMainFrame ?? true)) {
+              return;
             }
+
+            // A cancellation is not a render failure. Replacing the ad calls
+            // loadRequest on the same controller, and WebKit aborts the load
+            // still in flight with NSURLErrorCancelled — which arrives after
+            // the new ad is already current, so acting on it discards a fill
+            // that never had a chance to render. Tapping a creative that has
+            // not painted yet is the easy way to hit this.
+            if (error.errorCode == _urlCancelledErrorCode) {
+              return;
+            }
+
+            // Belt and braces for the same race on platforms that report a
+            // different code: an error carrying a URL that is not the creative
+            // being displayed belongs to a load this zone has moved on from.
+            final url = error.url;
+            final ad = _currentAd;
+
+            if (url != null &&
+                url.isNotEmpty &&
+                ad != null &&
+                ad.creativeUrl.isNotEmpty &&
+                url != ad.creativeUrl) {
+              return;
+            }
+
+            _onCreativeFailed();
           },
         ),
       );

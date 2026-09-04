@@ -91,6 +91,64 @@ Future<void> finishCreative(WidgetTester tester) async {
   await settle(tester);
 }
 
+/// Pumps a zone with only a width bound, so an unfilled zone genuinely
+/// collapses to nothing.
+///
+/// [pumpZone] wraps the zone in a tight 320x250 box, which means an unfilled
+/// zone keeps a measurable size there and the collapse path is never exercised.
+/// @param tester - The widget tester.
+/// @param zone - The zone to place.
+Future<void> pumpLooseZone(WidgetTester tester, Widget zone) async {
+  await tester.pumpWidget(
+    MaterialApp(
+      home: Scaffold(
+        body: Column(children: <Widget>[SizedBox(width: 320, child: zone)]),
+      ),
+    ),
+  );
+
+  await settle(tester);
+}
+
+/// Pumps a zone inside a scroll view, below [leadingHeight] of filler.
+///
+/// A `SingleChildScrollView` rather than a `ListView`, deliberately: a ListView
+/// disposes off-screen children, so a zone scrolled away is torn down and its
+/// impression_end comes from disposal rather than from the visibility path the
+/// test means to exercise.
+/// @param tester - The widget tester.
+/// @param zone - The zone to place.
+/// @param leadingHeight - How much filler sits above the zone.
+/// @returns the controller driving the scroll view.
+Future<ScrollController> pumpScrollingZone(
+  WidgetTester tester,
+  Widget zone, {
+  double leadingHeight = 2000,
+}) async {
+  final controller = ScrollController();
+
+  await tester.pumpWidget(
+    MaterialApp(
+      home: Scaffold(
+        body: SingleChildScrollView(
+          controller: controller,
+          child: Column(
+            children: <Widget>[
+              SizedBox(height: leadingHeight),
+              SizedBox(width: 320, height: 250, child: zone),
+              const SizedBox(height: 2000),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+
+  await settle(tester);
+
+  return controller;
+}
+
 void main() {
   late FakeBackend backend;
   late AdadaptedFlutterSdk sdk;
@@ -245,7 +303,7 @@ void main() {
 
       await settle(tester);
 
-      expect(tester.getSize(find.byType(AdZone)), Size.zero);
+      expect(tester.getSize(find.byType(AdZone)).height, 0);
     });
   });
 
@@ -356,6 +414,41 @@ void main() {
 
       expect(backend.reportedAdEvents, isNot(contains('impression')));
       expect(backend.reportedAdEvents, contains('zone_unfilled'));
+    });
+
+    testWidgets('survive a load cancelled by the next one', (tester) async {
+      await initialize(tester);
+      await pumpZone(tester, const AdZone(zoneId: 'zone-1', isVisible: true));
+
+      // Replacing an ad calls loadRequest on the same controller, and WebKit
+      // aborts the load still in flight with NSURLErrorCancelled. That arrives
+      // against the ad that just became current.
+      controller.failLoad(errorCode: -999);
+
+      await settle(tester);
+
+      expect(backend.reportedAdEvents, isNot(contains('zone_unfilled')));
+
+      await finishCreative(tester);
+
+      expect(backend.reportedAdEvents, contains('impression'));
+    });
+
+    testWidgets('survive an error for a creative already moved on from', (
+      tester,
+    ) async {
+      await initialize(tester);
+      await pumpZone(tester, const AdZone(zoneId: 'zone-1', isVisible: true));
+
+      controller.failLoad(url: 'https://creatives.test/a-previous-ad');
+
+      await settle(tester);
+
+      expect(backend.reportedAdEvents, isNot(contains('zone_unfilled')));
+
+      await finishCreative(tester);
+
+      expect(backend.reportedAdEvents, contains('impression'));
     });
 
     testWidgets('are not discarded by a sub-resource failure', (tester) async {
@@ -667,6 +760,44 @@ void main() {
         backend.reportedAdEvents.where((e) => e == 'impression_end').length,
         1,
       );
+    });
+
+    testWidgets('names the ad and impression each rotation event belongs to', (
+      tester,
+    ) async {
+      await initialize(tester);
+      await pumpZone(tester, const AdZone(zoneId: 'zone-1', isVisible: true));
+      await finishCreative(tester);
+
+      backend.responses['/ad/retrieve'] = adResponse(id: 'ad-2');
+
+      await tester.pump(const Duration(seconds: 31));
+      await settle(tester);
+      await finishCreative(tester);
+
+      final events = backend
+          .requestsTo('/ad/events')
+          .expand((r) => r.events)
+          .toList();
+      final impressions = events
+          .where((e) => e['event_type'] == 'impression')
+          .toList();
+      final ends = events
+          .where((e) => e['event_type'] == 'impression_end')
+          .toList();
+
+      // Each ad gets its own pair, and the closing event belongs to the ad
+      // going out rather than the one arriving.
+      expect(impressions.map((e) => e['ad_id']).toList(), <String>[
+        'ad-1',
+        'ad-2',
+      ]);
+      expect(impressions.map((e) => e['impression_id']).toList(), <String>[
+        'imp-ad-1',
+        'imp-ad-2',
+      ]);
+      expect(ends.single['ad_id'], 'ad-1');
+      expect(ends.single['impression_id'], 'imp-ad-1');
     });
 
     testWidgets('reloads a repeated creative so its impression lands', (
@@ -1080,6 +1211,33 @@ void main() {
       expect(backend.reportedAdEvents, isNot(contains('interaction')));
     });
 
+    testWidgets('an ad tapped after teardown reaches nobody', (tester) async {
+      final received = <DetailedListItem>[];
+
+      await initialize(tester);
+      await pumpZone(
+        tester,
+        AdZone(
+          zoneId: 'zone-1',
+          isVisible: true,
+          onAddToListTriggered: received.addAll,
+        ),
+      );
+      await finishCreative(tester);
+
+      sdk.unmount();
+
+      await settle(tester);
+
+      await tester.tapAt(tester.getCenter(find.byType(AdZone)));
+      await settle(tester);
+
+      // Reporting closed out at teardown, so an ad left on screen would still
+      // be tappable while its interaction went unreported.
+      expect(received, isEmpty);
+      expect(backend.reportedAdEvents, isNot(contains('interaction')));
+    });
+
     testWidgets('restarts a zone that a later initialize revives', (
       tester,
     ) async {
@@ -1100,6 +1258,80 @@ void main() {
   });
 
   group('measured visibility', () {
+    testWidgets('does not bill a zone that mounts below the fold', (
+      tester,
+    ) async {
+      await initialize(tester);
+
+      final controller = await pumpScrollingZone(
+        tester,
+        const AdZone(zoneId: 'zone-1'),
+      );
+
+      await finishCreative(tester);
+
+      // visibility_detector never calls back for a widget whose first
+      // measurement is off screen, so nothing will arrive to say this zone is
+      // hidden. Treating "not measured yet" as visible bills an impression the
+      // user never had a chance to see.
+      expect(backend.reportedAdEvents, isNot(contains('impression')));
+
+      controller.jumpTo(2000);
+
+      await settle(tester);
+
+      expect(backend.reportedAdEvents, contains('impression'));
+
+      controller.dispose();
+    });
+
+    testWidgets('ends the impression when scrolled away, not on disposal', (
+      tester,
+    ) async {
+      await initialize(tester);
+
+      final controller = await pumpScrollingZone(
+        tester,
+        const AdZone(zoneId: 'zone-1'),
+        leadingHeight: 0,
+      );
+
+      await finishCreative(tester);
+
+      expect(backend.reportedAdEvents, contains('impression'));
+
+      controller.jumpTo(1500);
+
+      await settle(tester);
+
+      // The zone is still mounted — a SingleChildScrollView does not dispose
+      // its children — so this can only have come from the visibility path.
+      expect(find.byType(AdZone), findsOneWidget);
+      expect(backend.reportedAdEvents, contains('impression_end'));
+
+      controller.dispose();
+    });
+
+    testWidgets('keeps an unfilled zone pacing when it truly collapses', (
+      tester,
+    ) async {
+      backend.responses['/ad/retrieve'] = adResponse(id: '', refreshTime: 30);
+
+      await initialize(tester);
+      await pumpLooseZone(tester, const AdZone(zoneId: 'zone-1'));
+
+      // Loosely constrained, so an unfilled zone really is zero-sized and can
+      // never be measured. Gating its countdown on a measurement would strand
+      // it unfilled forever.
+      expect(tester.getSize(find.byType(AdZone)).height, 0);
+      expect(backend.requestsTo('/ad/retrieve').length, 1);
+
+      await tester.pump(const Duration(seconds: 31));
+      await settle(tester);
+
+      expect(backend.requestsTo('/ad/retrieve').length, 2);
+    });
+
     testWidgets('serves a zone that is on screen', (tester) async {
       await initialize(tester);
       await pumpZone(tester, const AdZone(zoneId: 'zone-1'));
