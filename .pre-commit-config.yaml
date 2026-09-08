@@ -1,0 +1,37 @@
+# Install with: pip install pre-commit && pre-commit install
+repos:
+    - repo: local
+      hooks:
+          - id: dart-format
+            name: dart format
+            entry: dart format
+            language: system
+            types: [dart]
+
+          - id: flutter-analyze
+            name: flutter analyze
+            entry: flutter analyze
+            language: system
+            types: [dart]
+            pass_filenames: false
+
+          - id: check-version
+            name: sdk version matches pubspec
+            entry: dart run tool/check_version.dart
+            language: system
+            files: ^(pubspec\.yaml|lib/src/version\.dart)$
+            pass_filenames: false
+
+          - id: flutter-test
+            name: flutter test
+            entry: flutter test
+            language: system
+            types: [dart]
+            pass_filenames: false
+
+    - repo: https://github.com/compilerla/conventional-pre-commit
+      rev: v4.0.0
+      hooks:
+          - id: conventional-pre-commit
+            stages: [commit-msg]
+            args: []

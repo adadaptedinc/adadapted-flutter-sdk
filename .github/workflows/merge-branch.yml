@@ -1,0 +1,111 @@
+# IMPORTANT: secrets.CICD_GITHUB_TOKEN must be newly generated every year.
+# One year is the longest expiration time that can be chosen for custom access tokens.
+# Secrets are set here for the Org: https://github.com/organizations/adadaptedinc/settings/secrets/actions
+# Fine-grained tokens can be generated here: https://github.com/settings/tokens?type=beta
+#   - Expiration: 1 year out
+#   - Resource Owner: adadaptedinc
+#   - Repository Access: must include this repository (the header copied from the
+#     other SDK repos claims All Repositories; verify, because this repo is newer
+#     than the token and a "only select repositories" token will not cover it)
+#   - Permissions:
+#       - Repository Permissions:
+#           - Actions: Read and Write
+#           - Contents: Read and Write
+#       - Organization Permissions: none
+
+name: Merge Branch
+on:
+    pull_request:
+        branches: [main]
+        types:
+            - opened
+            - reopened
+            - synchronize
+    push:
+        branches:
+            - "**"
+        tags-ignore:
+            - "**"
+permissions:
+    contents: read
+jobs:
+    validation:
+        name: validation # Used for a Github environment protection ruleset. The name must be the same for the ruleset to work.
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+              with:
+                  ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
+            - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+              with:
+                  channel: stable
+                  cache: true
+            - name: Flutter Install
+              run: flutter pub get
+            - name: Flutter Install (example app)
+              run: flutter pub get
+              working-directory: example
+            - name: Format Validation
+              run: dart format --output=none --set-exit-if-changed .
+            - name: Linting Validation
+              run: flutter analyze
+            - name: Linting Validation (example app)
+              run: flutter analyze
+              working-directory: example
+            # The version the SDK reports to the API is a constant, because Dart
+            # has no runtime access to its own pubspec. A mismatch is invisible
+            # at runtime and would ship as SDK version reporting gone stale.
+            - name: Version Validation
+              run: dart run tool/check_version.dart
+            - name: Unit Tests
+              run: flutter test
+            # flutter analyze does not look at android/ or ios/, so nothing above
+            # this compiles a line of Kotlin or Swift. Building the example is
+            # what stops a native break — or a Gradle bump Renovate automerged —
+            # from going green and getting tagged.
+            - name: Android Build Validation
+              run: flutter build apk --debug
+              working-directory: example
+    create_release_version:
+        if: ${{ github.event_name == 'push' && github.ref_name == 'main'}}
+        needs: [validation]
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+        outputs:
+            new_tag: ${{steps.version.outputs.tag}}
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+              with:
+                  ref: main
+            # The tag comes from pubspec.yaml, not from a conventional-commit
+            # bump. This package has no publish step, so nothing stamps the
+            # version into the artifact the way `npm version` does for the RN and
+            # JS SDKs: lib/src/version.dart is what every request reports as
+            # sdk_version, and it is maintained by hand. Deriving the tag from the
+            # same file makes a forgotten bump fail the release instead of
+            # shipping a tag that disagrees with what the SDK reports.
+            - name: Read the version to release
+              id: version
+              run: |
+                  VERSION=$(sed -n 's/^version:[[:space:]]*//p' pubspec.yaml | head -1)
+                  if [ -z "$VERSION" ]; then
+                    echo "No version found in pubspec.yaml." >&2
+                    exit 1
+                  fi
+                  echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+                  echo "Releasing v$VERSION"
+            - name: Fail if that version was already released
+              run: |
+                  TAG='${{steps.version.outputs.tag}}'
+                  if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+                    echo "$TAG already exists. Bump version in pubspec.yaml and lib/src/version.dart." >&2
+                    exit 1
+                  fi
+            - name: Create a GitHub release
+              uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1
+              with:
+                  token: ${{secrets.CICD_GITHUB_TOKEN}}
+                  tag: ${{steps.version.outputs.tag}}
+                  name: Release ${{steps.version.outputs.tag}}
+                  generateReleaseNotes: true
