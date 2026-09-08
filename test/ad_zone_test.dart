@@ -1312,6 +1312,70 @@ void main() {
       controller.dispose();
     });
 
+    testWidgets('re-arms an off-screen zone that goes unfilled', (
+      tester,
+    ) async {
+      await initialize(tester);
+
+      final controller = ScrollController();
+
+      Future<void> pumpWith(String contextId) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: SingleChildScrollView(
+                controller: controller,
+                child: Column(
+                  children: <Widget>[
+                    SizedBox(
+                      width: 320,
+                      height: 250,
+                      child: AdZone(zoneId: 'zone-1', contextId: contextId),
+                    ),
+                    const SizedBox(height: 2000),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+
+        await settle(tester);
+      }
+
+      await pumpWith('recipe-1');
+      await finishCreative(tester);
+
+      expect(backend.reportedAdEvents, contains('impression'));
+
+      // Off screen, so the countdown is frozen and the zone still holds a
+      // renderable ad.
+      controller.jumpTo(1500);
+
+      await settle(tester);
+
+      // A context change is the realistic way a zone that nobody is looking at
+      // gets a new ad — and this one comes back empty.
+      backend.responses['/ad/retrieve'] = adResponse(id: '', refreshTime: 30);
+
+      await pumpWith('recipe-2');
+
+      final afterUnfilled = backend.requestsTo('/ad/retrieve').length;
+
+      await tester.pump(const Duration(seconds: 31));
+      await settle(tester);
+
+      // The zone now has nothing to render, so it can never be measured again
+      // and nothing else will wake it. If the countdown was not re-armed when
+      // the ad went away, it is stuck unfilled for the rest of the session.
+      expect(
+        backend.requestsTo('/ad/retrieve').length,
+        greaterThan(afterUnfilled),
+      );
+
+      controller.dispose();
+    });
+
     testWidgets('keeps an unfilled zone pacing when it truly collapses', (
       tester,
     ) async {

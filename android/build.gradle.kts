@@ -22,11 +22,17 @@ allprojects {
     }
 }
 
-// Deliberately no `kotlin-android` plugin and no `kotlinOptions` block. Flutter
-// 3.47 applies Kotlin to plugin modules itself, and a plugin that applies it
-// again is warned about on every build and will break outright when the
-// built-in path becomes the only one. The jvmTarget moves to the top level
-// `kotlin` block below. See:
+// Deliberately no `kotlin-android` plugin and no `kotlinOptions` block: Flutter
+// applies Kotlin to plugin modules itself, and a plugin that applies it again is
+// warned about on every build and will break when the built-in path becomes the
+// only one. The jvmTarget moves to the top level `kotlin` block below.
+//
+// The floor for this shape is Flutter 3.44, which is what pubspec.yaml requires
+// and what the migration guide tells plugin authors to set — from 3.44 the
+// minimum KGP is 2.0.0, so apps using this plugin build on AGP 9. Flutter 3.47
+// is a different threshold: it is what an app needs to turn built-in Kotlin on
+// explicitly with `android.builtInKotlin=true`, not what this module needs to
+// compile. See:
 // https://docs.flutter.dev/release/breaking-changes/migrate-to-built-in-kotlin/for-plugin-authors
 plugins {
     id("com.android.library")

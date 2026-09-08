@@ -11,6 +11,10 @@ const Map<String, Object> _intercepts = <String, Object>{
   'success': true,
   'data': <String, Object>{
     'search_id': 'test-search-id',
+    // Deliberately not in the order performKeywordSearch should return them.
+    // `List.sort` insertion-sorts below 32 elements and is stable there, so a
+    // fixture already in sorted order would pass even with the term and term_id
+    // clauses removed — the input order alone would produce the right answer.
     'terms': <Map<String, Object>>[
       <String, Object>{
         'term_id': 'term-1',
@@ -18,16 +22,32 @@ const Map<String, Object> _intercepts = <String, Object>{
         'replacement': 'Fairlife Milk',
         'priority': 1,
       },
+      // Same priority and term as term-4 but for case, so only the term_id
+      // clause can separate the two — and it has to reverse them.
       <String, Object>{
-        'term_id': 'term-2',
-        'term': 'milk',
-        'replacement': 'A2 Milk',
+        'term_id': 'term-5',
+        'term': 'Milkshake',
+        'replacement': 'Shake B',
+        'priority': 0,
+      },
+      <String, Object>{
+        'term_id': 'term-4',
+        'term': 'milkshake',
+        'replacement': 'Shake A',
         'priority': 0,
       },
       <String, Object>{
         'term_id': 'term-3',
         'term': 'CHEESE',
         'replacement': 'Kraft Singles',
+        'priority': 0,
+      },
+      // Shares a prefix with the two above at the same priority, so the term
+      // clause decides — and it has to move this one to the front.
+      <String, Object>{
+        'term_id': 'term-2',
+        'term': 'milk',
+        'replacement': 'Sample Keyword Replacement',
         'priority': 0,
       },
     ],
@@ -72,6 +92,8 @@ void main() {
       expect(results.map((r) => r.termId).toSet(), <String>{
         'term-1',
         'term-2',
+        'term-4',
+        'term-5',
       });
     });
 
@@ -103,6 +125,22 @@ void main() {
       expect(results.first.termId, 'term-2');
       expect(results.first.priority, 0);
     });
+
+    test('breaks ties on the term, then on the term id', () {
+      final results = sdk.performKeywordSearch('milk');
+
+      // Priority first: the three priority-0 terms precede the priority-1 one.
+      // Then the term, case-insensitively, which puts "milk" before
+      // "milkshake". Then term_id, the only thing separating "milkshake" from
+      // "Milkshake". Without a total order these come back in whatever order
+      // /intercept/retrieve happened to return them in.
+      expect(results.map((r) => r.termId).toList(), <String>[
+        'term-2',
+        'term-4',
+        'term-5',
+        'term-1',
+      ]);
+    });
   });
 
   group('reporting', () {
@@ -111,7 +149,12 @@ void main() {
 
       await pumpEventQueue();
 
-      expect(interceptEvents(), <String>['matched', 'matched']);
+      expect(interceptEvents(), <String>[
+        'matched',
+        'matched',
+        'matched',
+        'matched',
+      ]);
     });
 
     test('reports the search id and user input on each event', () async {

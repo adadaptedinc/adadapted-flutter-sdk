@@ -4,8 +4,9 @@ import PackageDescription
 
 // Swift Package Manager support, alongside the podspec one directory up. Both
 // build the same sources under Sources/, so there is one copy of the plugin and
-// a host can integrate it either way. Flutter warns on every build for a plugin
-// that offers only CocoaPods, and has said that will become an error.
+// a host can integrate it either way. A plugin that offers only CocoaPods is
+// warned about on every build of a host app, and Flutter has said that will
+// become an error. This is not a version floor — pubspec.yaml sets that.
 //
 // The product name is the package name with hyphens. FlutterFramework is a
 // relative path dependency Flutter materialises next to this package when it

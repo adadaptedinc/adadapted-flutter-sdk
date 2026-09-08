@@ -793,11 +793,18 @@ class _AdZoneState extends State<AdZone> {
     // sets this and files the impression from there.
     _creativeLoaded = false;
 
-    // Armed before anything else, so a later failure cannot leave the zone
-    // without a refresh timer.
-    _restartTimer();
-
+    // The ad goes in before the countdown is armed, because arming it consults
+    // [_shouldPace], which asks whether the zone has anything to render. Doing
+    // this the other way round asked about the ad on its way out: a filled zone
+    // going unfilled while off screen would be told to stay paused, and once it
+    // collapsed there was nothing left to measure and nothing to wake it, so it
+    // sat unfilled for the rest of the session. A context change on a zone the
+    // user has scrolled past is the easy way in.
     _setCurrentAd(ad);
+
+    // Armed straight after, so a later failure cannot leave the zone without a
+    // refresh timer.
+    _restartTimer();
 
     // Deliberately no impression here. It is owed when the creative has rendered
     // and the zone is on screen, whichever happens last, so it is filed from the

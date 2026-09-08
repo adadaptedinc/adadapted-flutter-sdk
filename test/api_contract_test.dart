@@ -7,6 +7,7 @@
 library;
 
 import 'package:adadapted_flutter_sdk/adadapted_flutter_sdk.dart';
+import 'package:adadapted_flutter_sdk/src/ad_request_context.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/test_harness.dart';
@@ -229,6 +230,74 @@ void main() {
       expect(body['sessionId'], sdk.sessionId);
       // Intercepts are not zone scoped.
       expect(body['zoneId'], '');
+    });
+  });
+
+  group('v1.0.0 event envelopes', () {
+    // The two routes this SDK moved to the v1.0.0 shape. FakeBackend answers an
+    // unmatched route with an empty 200, so without these assertions dropping
+    // app_id, udid or session_id from either envelope would pass green. The
+    // per-event fields are covered in the zone tests; this is the wrapper.
+
+    test('ad events identify the app, device and session', () async {
+      AdRequestContextRegistry.context!.reportAdEvent(
+        const AdEventReport(
+          adId: 'ad-1',
+          zoneId: 'zone-1',
+          impressionId: 'imp-1',
+          eventType: ReportedEventType.impression,
+        ),
+      );
+
+      await pumpEventQueue();
+
+      final request = backend.requestsTo('/v/1.0.0/ad/events').single;
+
+      expect(request.headers['x-api-key'], 'TEST_APP_ID');
+      expect(request.body['app_id'], 'TEST_APP_ID');
+      expect(request.body['udid'], 'TEST-UDID');
+      expect(request.body['session_id'], sdk.sessionId);
+      expect(request.events, hasLength(1));
+    });
+
+    test('intercept events identify the app, device and session', () async {
+      resetSdkStatics();
+
+      final other = FakeBackend();
+
+      other.responses['/intercept/retrieve'] = <String, Object>{
+        'success': true,
+        'data': <String, Object>{
+          'search_id': 'search-1',
+          'terms': <Map<String, Object>>[
+            <String, Object>{
+              'term_id': 'term-1',
+              'term': 'milk',
+              'replacement': 'Milk',
+              'priority': 0,
+            },
+          ],
+        },
+      };
+
+      final searching = buildSdk(other);
+
+      await searching.initialize(appId: 'TEST_APP_ID', apiEnv: ApiEnv.dev);
+      await pumpEventQueue();
+
+      searching.performKeywordSearch('milk');
+
+      await pumpEventQueue();
+
+      final request = other.requestsTo('/v/1.0.0/intercept/events').single;
+
+      expect(request.headers['x-api-key'], 'TEST_APP_ID');
+      expect(request.body['app_id'], 'TEST_APP_ID');
+      expect(request.body['udid'], 'TEST-UDID');
+      expect(request.body['session_id'], searching.sessionId);
+      expect(request.events, hasLength(1));
+
+      searching.unmount();
     });
   });
 
