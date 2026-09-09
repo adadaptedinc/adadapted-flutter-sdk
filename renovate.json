@@ -1,42 +1,101 @@
 {
     "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-    "extends": [
-        "config:recommended"
+    "extends": ["config:recommended", ":dependencyDashboard"],
+    "baseBranchPatterns": ["main"],
+    "enabledManagers": [
+        "pub",
+        "github-actions",
+        "pre-commit",
+        "gradle",
+        "gradle-wrapper",
+        "cocoapods"
     ],
+    "automerge": false,
+    "schedule": ["* 14-21 * * 1"],
+    "automergeSchedule": ["* 14-21 * * 1"],
+    "prConcurrentLimit": 5,
+    "minimumReleaseAge": "2 days",
+    "ignoreDeps": ["dart", "flutter"],
+    "vulnerabilityAlerts": {
+        "enabled": true
+    },
+    "lockFileMaintenance": {
+        "enabled": true,
+        "automerge": true,
+        "automergeType": "pr",
+        "automergeStrategy": "squash",
+        "platformAutomerge": true,
+        "labels": ["deps", "automerge", "lockfile"]
+    },
     "packageRules": [
         {
-            "description": "Dart and Flutter package updates are covered by analyze and the test suite.",
-            "matchManagers": [
-                "pub"
-            ],
-            "matchUpdateTypes": [
-                "minor",
-                "patch"
-            ],
-            "automerge": true
+            "description": "Dart and Flutter package updates are covered by flutter analyze and the test suite.",
+            "matchManagers": ["pub"],
+            "matchBaseBranches": ["main"],
+            "matchUpdateTypes": ["patch", "minor"],
+            "groupName": "All pub patch+minor updates",
+            "groupSlug": "pub-patch-minor-all",
+            "automerge": true,
+            "automergeType": "pr",
+            "automergeStrategy": "squash",
+            "labels": ["deps", "automerge"]
         },
         {
-            "description": "Gradle, Kotlin and CocoaPods updates touch code that only the example's Android build compiles, and nothing in CI compiles the iOS side at all. Keep them in front of a human until that gap is closed.",
-            "matchManagers": [
-                "gradle",
-                "gradle-wrapper",
-                "cocoapods"
-            ],
+            "matchManagers": ["pub"],
+            "matchBaseBranches": ["main"],
+            "matchUpdateTypes": ["major"],
             "automerge": false,
-            "reviewers": [
-                "jeramyadadapted",
-                "steveadadapted"
-            ]
+            "labels": ["deps", "major"],
+            "reviewers": ["jeramyadadapted", "steveadadapted"]
         },
         {
-            "matchUpdateTypes": [
-                "major"
-            ],
+            "description": "pub calls these dev_dependencies, not devDependencies as npm does.",
+            "matchManagers": ["pub"],
+            "matchBaseBranches": ["main"],
+            "matchDepTypes": ["dev_dependencies"],
+            "matchUpdateTypes": ["major"],
             "automerge": false,
-            "reviewers": [
-                "jeramyadadapted",
-                "steveadadapted"
-            ]
+            "automergeType": "pr",
+            "automergeStrategy": "squash",
+            "labels": ["deps", "dev"]
+        },
+        {
+            "description": "Gradle and Kotlin updates are compiled by the example's Android build in CI, but nothing in CI compiles the iOS side at all. Keep them in front of a human until that gap is closed.",
+            "matchManagers": ["gradle", "gradle-wrapper", "cocoapods"],
+            "automerge": false,
+            "labels": ["deps", "native"],
+            "reviewers": ["jeramyadadapted", "steveadadapted"]
+        },
+        {
+            "matchManagers": ["pre-commit"],
+            "matchUpdateTypes": ["major", "minor", "patch"],
+            "groupName": "Pre-commit hook updates",
+            "groupSlug": "pre-commit-all",
+            "automerge": true,
+            "automergeType": "pr",
+            "automergeStrategy": "squash",
+            "labels": ["deps", "pre-commit", "automerge"]
+        },
+        {
+            "matchManagers": ["github-actions"],
+            "pinDigests": true
+        },
+        {
+            "matchManagers": ["github-actions"],
+            "matchUpdateTypes": ["minor", "patch"],
+            "groupName": "GitHub Actions minor+patch updates",
+            "groupSlug": "github-actions-minor-patch",
+            "automerge": true,
+            "automergeType": "pr",
+            "automergeStrategy": "squash",
+            "labels": ["deps", "infra", "github-actions", "automerge"]
+        },
+        {
+            "matchManagers": ["github-actions"],
+            "matchUpdateTypes": ["major"],
+            "automerge": false,
+            "labels": ["deps", "infra", "github-actions", "major"],
+            "reviewers": ["jeramyadadapted", "steveadadapted"]
         }
     ]
 }
