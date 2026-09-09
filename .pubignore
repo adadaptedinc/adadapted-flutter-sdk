@@ -19,7 +19,12 @@ Pods/
 
 # Development tooling that consumers of the package have no use for. The example
 # is deliberately NOT excluded — pub.dev renders it as the package's Example tab.
+#
+# test/ goes too, and not only for size: some of it imports tool/, which is
+# excluded here, so shipping the tests would put dangling imports in the archive
+# for pub.dev's analysis to trip over.
 .github/
+test/
 tool/
 renovate.json
 .pre-commit-config.yaml
