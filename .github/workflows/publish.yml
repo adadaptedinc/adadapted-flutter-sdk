@@ -1,0 +1,97 @@
+# Publishes the package to pub.dev.
+#
+# Triggered by the tag that create_release_version pushes in merge-branch.yml,
+# never by a push to a branch: pub.dev refuses to publish from a GitHub Actions
+# run that was not triggered by a tag, and validates that the tag matches the
+# pattern configured on the package's admin page.
+#
+# Authentication is a short-lived GitHub-signed OIDC token exchanged for a pub.dev
+# credential. There is no long-lived secret here, and nothing to rotate — unlike
+# CICD_GITHUB_TOKEN, which merge-branch.yml needs.
+#
+# THREE THINGS MUST BE DONE BY HAND BEFORE THIS CAN EVER RUN, IN THIS ORDER:
+#
+#   1. DONE — the adadapted.com verified publisher exists on pub.dev.
+#   2. Publish the first version manually with `flutter pub publish`, then
+#      transfer the package to adadapted.com from its Admin tab. Two separate
+#      steps, because `pub` cannot publish a new package into a publisher: it
+#      always lands under the Google Account that ran the command, and is moved
+#      afterwards. Whoever runs it must therefore end up BOTH an uploader of the
+#      package AND an admin of the adadapted.com publisher, or they will not be
+#      able to complete the transfer. The transfer is irreversible — a package
+#      cannot be moved back to an individual account.
+#   3. Enable automated publishing on
+#      https://pub.dev/packages/adadapted_flutter_sdk/admin — set the repository
+#      to adadaptedinc/adadapted-flutter-sdk and the tag pattern to v{{version}}.
+#      Only an existing uploader or publisher admin can do this, which is why it
+#      follows step 2.
+#
+# Note that this workflow does not, and cannot, assert which publisher owns the
+# package: pub.dev enforces that server-side from the configuration above. If the
+# first publish went to the wrong account, or was never transferred, nothing here
+# will tell you.
+#
+# Until all three are done this workflow will fail at the publish step, which is
+# why it is deliberately separate from validation: a publishing failure must never
+# make a merge to main look broken.
+
+name: Publish
+
+on:
+    push:
+        tags:
+            - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+    contents: read
+
+jobs:
+    publish:
+        name: publish
+        runs-on: ubuntu-latest
+        permissions:
+            # Required for pub.dev's OIDC exchange. Without it the token request
+            # below returns nothing and publishing fails.
+            id-token: write
+            contents: read
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+            - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+              with:
+                  channel: stable
+                  cache: true
+            - name: Flutter Install
+              run: flutter pub get
+            # The tag is only created after validation passed on main, so these are
+            # a re-check rather than the gate. They are cheap, and publishing is the
+            # one thing here that cannot be undone.
+            - name: Linting Validation
+              run: flutter analyze
+            - name: Unit Tests
+              run: flutter test
+            - name: Version Validation
+              run: dart run tool/check_version.dart
+            # The tag is what pub.dev authorises against, and the pubspec is what
+            # decides the published version. A mismatch would publish a version
+            # nobody tagged.
+            - name: Tag Validation
+              run: |
+                  VERSION=$(sed -n 's/^version:[[:space:]]*//p' pubspec.yaml | head -1)
+                  if [ "v$VERSION" != "$GITHUB_REF_NAME" ]; then
+                    echo "Tag $GITHUB_REF_NAME does not match pubspec version $VERSION." >&2
+                    exit 1
+                  fi
+                  echo "Publishing $GITHUB_REF_NAME"
+            - name: Publish Dry Run
+              run: flutter pub publish --dry-run
+            - name: Exchange the OIDC token for a pub.dev credential
+              run: |
+                  PUB_TOKEN=$(curl --retry 5 --fail --silent --show-error \
+                    -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+                    "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://pub.dev" \
+                    | jq -r '.value')
+                  echo "::add-mask::$PUB_TOKEN"
+                  echo "PUB_TOKEN=$PUB_TOKEN" >> "$GITHUB_ENV"
+                  flutter pub token add https://pub.dev --env-var PUB_TOKEN
+            - name: Publish
+              run: flutter pub publish --force

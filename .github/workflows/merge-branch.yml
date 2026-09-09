@@ -78,31 +78,33 @@ jobs:
             - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
               with:
                   ref: main
+                  # release_decision.dart reads the pubspec at the SHA the push
+                  # started from, which a shallow checkout does not have.
+                  fetch-depth: 0
+            - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+              with:
+                  channel: stable
+                  cache: true
             # The tag comes from pubspec.yaml, not from a conventional-commit
             # bump. This package has no publish step, so nothing stamps the
             # version into the artifact the way `npm version` does for the RN and
             # JS SDKs: lib/src/version.dart is what every request reports as
-            # sdk_version, and it is maintained by hand. Deriving the tag from the
-            # same file makes a forgotten bump fail the release instead of
-            # shipping a tag that disagrees with what the SDK reports.
-            - name: Read the version to release
+            # sdk_version, and it is maintained by hand.
+            #
+            # Not every merge to main is a release, though. Docs, CI and the
+            # dependency bumps Renovate automerges all land here without touching
+            # the version, and failing those would leave main permanently red
+            # between releases. The rule lives in tool/release_decision.dart so
+            # it can be tested — see test/release_decision_test.dart.
+            - name: Decide whether to release
               id: version
-              run: |
-                  VERSION=$(sed -n 's/^version:[[:space:]]*//p' pubspec.yaml | head -1)
-                  if [ -z "$VERSION" ]; then
-                    echo "No version found in pubspec.yaml." >&2
-                    exit 1
-                  fi
-                  echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
-                  echo "Releasing v$VERSION"
-            - name: Fail if that version was already released
-              run: |
-                  TAG='${{steps.version.outputs.tag}}'
-                  if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
-                    echo "$TAG already exists. Bump version in pubspec.yaml and lib/src/version.dart." >&2
-                    exit 1
-                  fi
+              run: dart run tool/release_decision.dart "${{ github.event.before }}"
+            # Creating the tag with CICD_GITHUB_TOKEN rather than GITHUB_TOKEN is
+            # load-bearing: GitHub does not trigger workflows for events raised by
+            # the default token, so publish.yml would never fire and the package
+            # would silently stop being published while releases kept appearing.
             - name: Create a GitHub release
+              if: steps.version.outputs.release == 'true'
               uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1
               with:
                   token: ${{secrets.CICD_GITHUB_TOKEN}}
