@@ -86,10 +86,11 @@ jobs:
                   channel: stable
                   cache: true
             # The tag comes from pubspec.yaml, not from a conventional-commit
-            # bump. This package has no publish step, so nothing stamps the
-            # version into the artifact the way `npm version` does for the RN and
-            # JS SDKs: lib/src/version.dart is what every request reports as
-            # sdk_version, and it is maintained by hand.
+            # bump. Nothing stamps the version into the artifact the way
+            # `npm version` does for the RN and JS SDKs — publish.yml reads the
+            # version, it never sets it — so pubspec.yaml and
+            # lib/src/version.dart, the constant every request reports as
+            # sdk_version, are both maintained by hand.
             #
             # Not every merge to main is a release, though. Docs, CI and the
             # dependency bumps Renovate automerges all land here without touching

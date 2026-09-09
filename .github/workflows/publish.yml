@@ -9,31 +9,28 @@
 # credential. There is no long-lived secret here, and nothing to rotate — unlike
 # CICD_GITHUB_TOKEN, which merge-branch.yml needs.
 #
-# THREE THINGS MUST BE DONE BY HAND BEFORE THIS CAN EVER RUN, IN THIS ORDER:
+# THREE THINGS HAVE TO BE DONE BY HAND, IN THIS ORDER, BEFORE THIS CAN RUN:
 #
 #   1. DONE — the adadapted.com verified publisher exists on pub.dev.
-#   2. Publish the first version manually with `flutter pub publish`, then
-#      transfer the package to adadapted.com from its Admin tab. Two separate
-#      steps, because `pub` cannot publish a new package into a publisher: it
-#      always lands under the Google Account that ran the command, and is moved
-#      afterwards. Whoever runs it must therefore end up BOTH an uploader of the
-#      package AND an admin of the adadapted.com publisher, or they will not be
-#      able to complete the transfer. The transfer is irreversible — a package
-#      cannot be moved back to an individual account.
+#   2. DONE — 0.1.1 was published by hand and the package is owned by the
+#      adadapted.com publisher. pub.dev only automates publishing for packages
+#      that already exist, so a package's first version can never come from this
+#      workflow. Whoever performs it has to end up BOTH an uploader of the
+#      package AND an admin of the publisher, because only those two can do
+#      step 3. Publisher ownership is irreversible: a package cannot be moved
+#      back to an individual account.
 #   3. Enable automated publishing on
 #      https://pub.dev/packages/adadapted_flutter_sdk/admin — set the repository
 #      to adadaptedinc/adadapted-flutter-sdk and the tag pattern to v{{version}}.
-#      Only an existing uploader or publisher admin can do this, which is why it
-#      follows step 2.
+#      This is the one still outstanding. Until it is done, pub.dev has nothing
+#      to authorise the OIDC token against and the publish step fails.
+#
+# That failure is exactly why this workflow is separate from validation: a
+# publishing failure must never make a merge to main look broken.
 #
 # Note that this workflow does not, and cannot, assert which publisher owns the
-# package: pub.dev enforces that server-side from the configuration above. If the
-# first publish went to the wrong account, or was never transferred, nothing here
-# will tell you.
-#
-# Until all three are done this workflow will fail at the publish step, which is
-# why it is deliberately separate from validation: a publishing failure must never
-# make a merge to main look broken.
+# package: pub.dev enforces that server-side from the configuration above. If a
+# release goes to the wrong account, nothing here will tell you.
 
 name: Publish
 
