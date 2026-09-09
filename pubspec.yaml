@@ -2,7 +2,7 @@ name: adadapted_flutter_sdk
 description: >-
   The AdAdapted Flutter SDK. Integrates the AdAdapted ad platform into a Flutter
   app: ad zones, keyword intercepts, add-to-list payloads and event reporting.
-version: 0.1.1
+version: 0.1.2
 homepage: https://github.com/adadaptedinc/adadapted-flutter-sdk
 repository: https://github.com/adadaptedinc/adadapted-flutter-sdk
 issue_tracker: https://github.com/adadaptedinc/adadapted-flutter-sdk/issues
