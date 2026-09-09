@@ -4,6 +4,14 @@ All notable changes to this project are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and its releases are cut from
 [Conventional Commits](https://www.conventionalcommits.org/).
 
+## 0.1.2
+
+No change to the library. The only published files that differ from 0.1.1 are
+the two version declarations and this changelog; every line of `lib/`, `android/`
+and `ios/` is identical. The release exists to exercise the automated publishing
+pipeline end to end — tag, OIDC exchange, upload — which had never run, so that
+its first execution is not one that matters.
+
 ## 0.1.1
 
 Packaging only, ahead of the first publish to pub.dev. No change to the library.
