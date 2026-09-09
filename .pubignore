@@ -1,0 +1,31 @@
+# NOTE: pub uses this file INSTEAD of .gitignore when deciding what goes into the
+# published archive — it does not add to it. Every build output .gitignore keeps
+# out of git therefore has to be repeated here, or it ships. This is not
+# theoretical: `flutter test` leaves two ~46 MB kernel caches under
+# build/test_cache/, and publishing from a working tree put both in the archive,
+# taking it from 117 KB to 29 MB.
+#
+# Publishing is irreversible, so check the `--dry-run` file list before pushing a
+# version up.
+
+# Build outputs, at any depth — this covers example/build/ as well as ./build/.
+build/
+coverage/
+Pods/
+.symlinks/
+
+# Not the example's, which pub.dev renders as the Example tab.
+/pubspec.lock
+
+# Development tooling that consumers of the package have no use for. The example
+# is deliberately NOT excluded — pub.dev renders it as the package's Example tab.
+#
+# test/ goes too, and not only for size: some of it imports tool/, which is
+# excluded here, so shipping the tests would put dangling imports in the archive
+# for pub.dev's analysis to trip over.
+.github/
+test/
+tool/
+renovate.json
+.pre-commit-config.yaml
+CLAUDE.md
