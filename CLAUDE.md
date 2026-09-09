@@ -25,7 +25,38 @@ The example's iOS target builds through Swift Package Manager and through CocoaP
 
 Pre-commit runs format, analyze, the version check and the full test suite, plus Conventional Commits on the commit message. Install it with `pip install pre-commit && pre-commit install`.
 
-`main` is protected: changes go through a PR, and the required status check is the CI job literally named `validation` — do not rename that job. Merging to `main` tags a release; bump `pubspec.yaml` and `lib/src/version.dart` together in the PR you intend to release.
+`main` is protected: changes go through a PR, and the required status check is the CI job literally named `validation` — do not rename that job.
+
+### Releasing and publishing
+
+Bump `pubspec.yaml` and `lib/src/version.dart` together in the PR you intend to release; `tool/check_version.dart` fails when they disagree. Then:
+
+1. Merging to `main` runs `create_release_version`, which reads the version out of `pubspec.yaml`, fails if that tag already exists, and creates the tag and GitHub release.
+2. That tag push triggers `publish.yml`, which re-runs analyze, the tests and the version check, asserts the tag matches the pubspec, and publishes to pub.dev.
+
+Two things about this are easy to break:
+
+- **The tag must be created with `CICD_GITHUB_TOKEN`, not `GITHUB_TOKEN`.** GitHub does not trigger workflows for events raised by the default token, so switching it would leave releases appearing while publishing silently stopped.
+- **pub.dev authenticates by OIDC, not a secret.** There is nothing to rotate, but it only works if automated publishing is configured on the package's pub.dev admin page with repository `adadaptedinc/adadapted-flutter-sdk` and tag pattern `v{{version}}`. A package's first version can never come from CI — pub.dev only automates publishing for packages that already exist — so 0.1.1 was published by hand.
+
+### Who the package is published as
+
+Two different identities are involved, and only the first is a person:
+
+| | Identity | Proven by |
+| --- | --- | --- |
+| Manual publish | a Google account | browser sign-in |
+| Automated publish | none — the repository itself | OIDC claims: repo + tag pattern |
+
+`publish.yml` therefore has no account and no secret, and **cannot assert which publisher owns the package** — pub.dev enforces that server-side from what is configured on the admin page. If a release goes to the wrong account, nothing in CI will say so.
+
+The package is owned by the **`adadapted.com` verified publisher**. Getting it there was two steps, not one:
+
+> The pub command doesn't support direct publishing a new package to a verified publisher. As a temporary workaround, publish new packages to a Google Account, and then transfer the package to a publisher.
+
+So `flutter pub publish` lands a new package under whichever Google account ran it, and it is moved to the publisher afterwards from the package's Admin tab. That move requires being **both an uploader of the package and an admin of the publisher**, so the account that publishes has to end up with both. It is **irreversible**: a package cannot be moved back to an individual account.
+
+Because only an existing uploader or publisher admin can turn automated publishing on, whoever performs the first manual publish decides whether the rest of the pipeline can be configured at all. That is settled for this package, and is the thing to get right first on the next one.
 
 ## Architecture
 
@@ -97,9 +128,9 @@ These are intentional. Do not "restore parity" without a reason.
 
 ## Documentation owed to docs.adadapted.com
 
-The README is nine lines by design, matching the other AdAdapted SDK repos. That means the following have no home in this repository and need to reach the Flutter section of the docs site — ideally before the first tagged release, since a consumer cannot integrate without several of them:
+The README is nine lines by design, matching the other AdAdapted SDK repos. That means the following have no home in this repository and need to reach the Flutter section of the docs site. This is now overdue rather than pending: the package is on pub.dev, so anyone can install it, and several of these are things they cannot integrate without.
 
-- **Install**: the SSH git dependency, because the repository is private and an anonymous HTTPS fetch fails with `Repository not found`.
+- **Install**: `adadapted_flutter_sdk: ^0.1.1` from pub.dev.
 - **`NSUserTrackingUsageDescription`** in `ios/Runner/Info.plist`, and that **the host must request ATT before `initialize()`** — the status is read once, when device info is gathered, so a permission granted afterwards is not picked up until the next initialize.
 - **Minimum versions**: Flutter 3.44, Dart 3.12, iOS 15 (Flutter's own floor; the plugin declares 12.0 and does not raise it), Android SDK 24.
 - **The `handleDeepLink(url)` contract** — the host owns its link routing and passes every incoming link, including the launch link.
