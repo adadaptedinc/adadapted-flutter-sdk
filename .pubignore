@@ -1,0 +1,7 @@
+# Development tooling that consumers of the package have no use for. The example
+# is deliberately NOT excluded — pub.dev renders it as the package's Example tab.
+.github/
+tool/
+renovate.json
+.pre-commit-config.yaml
+CLAUDE.md

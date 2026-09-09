@@ -13,4 +13,4 @@
 library;
 
 /// The current SDK version.
-const String sdkVersion = '0.1.0';
+const String sdkVersion = '0.1.1';
