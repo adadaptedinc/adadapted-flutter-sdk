@@ -60,7 +60,14 @@
             "labels": ["deps", "dev"]
         },
         {
-            "description": "Gradle and Kotlin updates are compiled by the example's Android build in CI, but nothing in CI compiles the iOS side at all. Keep them in front of a human until that gap is closed.",
+            "description": "Kotlin is declared in two places that must move together: the example's settings.gradle.kts and the buildscript in android/build.gradle.kts. Renovate saw them as unrelated deps and opened one PR each for 2.4.20 (#6 and #7), which had to be merged as a pair or the build broke on a version mismatch. Grouping them makes a Kotlin release arrive as a single PR. This rule becomes unnecessary once the example migrates to AGP built-in Kotlin and the second declaration goes away — see the note in example/android/gradle.properties for why that migration is currently blocked upstream.",
+            "matchManagers": ["gradle"],
+            "matchPackageNames": ["/^org\\.jetbrains\\.kotlin/"],
+            "groupName": "Kotlin",
+            "groupSlug": "kotlin"
+        },
+        {
+            "description": "Native updates are now compiled on both sides — the example's Android build in `validation`, its iOS build in `ios_validation` — so these are covered by a compile rather than only by review. They stay in front of a human anyway: the example is the only thing that builds this code, it exercises one configuration rather than every consumer's, and a native break in a published SDK reaches consumers through a release. Revisit if that ever feels like more friction than it buys.",
             "matchManagers": ["gradle", "gradle-wrapper", "cocoapods"],
             "automerge": false,
             "labels": ["deps", "native"],

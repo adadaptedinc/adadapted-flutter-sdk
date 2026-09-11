@@ -62,13 +62,101 @@ jobs:
             # flutter analyze does not look at android/ or ios/, so nothing above
             # this compiles a line of Kotlin or Swift. Building the example is
             # what stops a native break — or a Gradle bump Renovate automerged —
-            # from going green and getting tagged.
+            # from going green and getting tagged. The iOS half of that lives in
+            # ios_validation below, because it needs a macOS runner.
             - name: Android Build Validation
               run: flutter build apk --debug
               working-directory: example
+    # Whether the iOS build needs to run at all. macOS runners bill at roughly
+    # ten times the Linux rate, and most merges here are Dart, docs or CI, none
+    # of which can break a Swift compile. This job is pennies on Linux and lets
+    # the expensive one stay skipped.
+    detect_ios_changes:
+        name: detect ios changes
+        # Both `push` and `pull_request` fire for a branch that has a PR open, so
+        # an unguarded job runs twice. `validation` wears that on Linux; a macOS
+        # runner should not. Pull requests and main are between them every path
+        # that reaches a release.
+        if: ${{ github.event_name == 'pull_request' || github.ref_name == 'main' }}
+        runs-on: ubuntu-latest
+        outputs:
+            ios: ${{ steps.filter.outputs.ios }}
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+              with:
+                  ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
+                  # The diff is taken against a base commit that a shallow
+                  # checkout does not contain.
+                  fetch-depth: 0
+            - name: Decide whether the iOS build is needed
+              id: filter
+              env:
+                  BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+              run: |
+                  # A branch's first push reports an all-zero "before", and a
+                  # force-push can name a commit this checkout no longer has.
+                  # Either way the diff is unknowable, so build rather than
+                  # guess — skipping is the answer that can be silently wrong.
+                  if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+                    echo "No usable base commit; running the iOS build."
+                    echo "ios=true" >> "$GITHUB_OUTPUT"
+                    exit 0
+                  fi
+
+                  CHANGED=$(git diff --name-only "$BASE" HEAD)
+                  echo "Changed files:"
+                  echo "$CHANGED" | sed 's/^/  /'
+
+                  # ios/ and example/ios/ are the Swift itself. The pubspecs and
+                  # the example's lockfile are here because a dependency change
+                  # changes which plugin code gets compiled — that covers
+                  # Renovate's cocoapods and pub PRs and its lockFileMaintenance
+                  # PRs, which touch only the lock. The workflow directory is
+                  # here so a change to this job is tested by the job.
+                  if echo "$CHANGED" | grep -qE '^(ios/|example/ios/|pubspec\.yaml$|example/pubspec\.(yaml|lock)$|\.github/workflows/)'; then
+                    echo "ios=true" >> "$GITHUB_OUTPUT"
+                    echo "iOS build required."
+                  else
+                    echo "ios=false" >> "$GITHUB_OUTPUT"
+                    echo "Nothing iOS-relevant changed; skipping the iOS build."
+                  fi
+    # NOTE: this job is deliberately NOT in main's required-checks ruleset. It is
+    # conditional, and a required check that sometimes does not run needs the
+    # ruleset configured to match. Wire it in deliberately or not at all — and do
+    # not rename `validation`, which the ruleset matches literally.
+    ios_validation:
+        name: ios validation
+        needs: [detect_ios_changes]
+        if: needs.detect_ios_changes.outputs.ios == 'true'
+        runs-on: macos-latest
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+              with:
+                  ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
+            - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+              with:
+                  channel: stable
+                  cache: true
+            - name: Flutter Install
+              run: flutter pub get
+            - name: Flutter Install (example app)
+              run: flutter pub get
+              working-directory: example
+            # The example keeps its Podfile on purpose, so this compiles the
+            # CocoaPods path as well as the Swift Package Manager one. macOS
+            # runners ship CocoaPods, so nothing needs installing — but the
+            # Podfile is why the build cannot run without it.
+            - name: iOS Build Validation
+              run: flutter build ios --debug --simulator --no-codesign
+              working-directory: example
     create_release_version:
-        if: ${{ github.event_name == 'push' && github.ref_name == 'main'}}
-        needs: [validation]
+        # `always()` is required because ios_validation is skipped on most
+        # merges, and a skipped dependency would otherwise skip this job and
+        # silently stop cutting releases. The conditions below therefore have to
+        # state what is actually wanted: validation passed, and the iOS build
+        # did not fail (skipped is fine).
+        if: ${{ always() && github.event_name == 'push' && github.ref_name == 'main' && needs.validation.result == 'success' && needs.detect_ios_changes.result == 'success' && needs.ios_validation.result != 'failure' }}
+        needs: [validation, detect_ios_changes, ios_validation]
         runs-on: ubuntu-latest
         permissions:
             contents: write
