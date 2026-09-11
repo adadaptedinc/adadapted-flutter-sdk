@@ -23,9 +23,33 @@ environment, not a fault. `example/README.md` has the full setup.
 
 The example's iOS target builds through Swift Package Manager and through CocoaPods (`flutter config --no-enable-swift-package-manager`). If Xcode ever reports `identity 'adadapted-flutter-sdk' doesn't match override's identity`, the generated package is stale rather than the layout being wrong: `rm -rf example/ios/Flutter/ephemeral example/ios/Pods example/ios/Podfile.lock && flutter clean`.
 
+#### The example keeps its CocoaPods integration on purpose
+
+Every iOS build prints a Flutter notice offering to `pod deintegrate`, because all plugins resolve as Swift Packages. **Do not act on it.** SPM is the default from Flutter 3.47, but a host app that has not moved yet integrates through CocoaPods, and the example is the only thing in this repository that compiles the iOS side. Dropping the Podfile would stop it exercising a configuration real consumers still have.
+
+The cost is real and worth knowing rather than rediscovering: the CocoaPods sandbox check is baked into `example/ios/Runner.xcodeproj/project.pbxproj`, so **the example cannot build for iOS at all unless CocoaPods is installed** — deleting the Podfile alone does not lift that, it fails with `The sandbox is not in sync with the Podfile.lock`. `flutter doctor` reports it when missing. GitHub's macOS runners ship it, so CI is unaffected.
+
 Pre-commit runs format, analyze, the version check and the full test suite, plus Conventional Commits on the commit message. Install it with `pip install pre-commit && pre-commit install`.
 
+### CI
+
 `main` is protected: changes go through a PR, and the required status check is the CI job literally named `validation` — do not rename that job.
+
+`merge-branch.yml` runs four jobs:
+
+| Job | Runner | When |
+| --- | --- | --- |
+| `validation` | Linux | Every push and PR. Format, analyze, version check, tests, and the example's **Android** build |
+| `detect_ios_changes` | Linux | PRs and `main`. Diffs the changed paths to decide the next job |
+| `ios_validation` | **macOS** | Only when `ios/`, `example/ios/`, a pubspec or `example/pubspec.lock` changed. Builds the example for the simulator |
+| `create_release_version` | Linux | Pushes to `main`, when the version changed |
+
+Two things about that shape are load-bearing:
+
+- **`ios_validation` is conditional, and is deliberately *not* in the required-checks ruleset.** A required check that sometimes does not run needs the ruleset configured to match it. Wire it in deliberately or leave it out.
+- **`create_release_version` uses `always()`.** `ios_validation` is skipped on most merges, and a skipped dependency would otherwise skip the release job and quietly stop cutting releases. Its condition therefore states what is wanted outright: `validation` succeeded, the detect job succeeded, and the iOS build did not *fail* — skipped being fine.
+
+macOS runners bill at roughly ten times the Linux rate, which is the whole reason for the path filter. `detect_ios_changes` also guards against running twice: both `push` and `pull_request` fire for a branch with an open PR, and `validation` wears that duplication on Linux where it is cheap.
 
 ### Releasing and publishing
 
