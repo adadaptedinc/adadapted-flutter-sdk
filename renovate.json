@@ -67,6 +67,13 @@
             "groupSlug": "kotlin"
         },
         {
+            "description": "AGP is declared in the same two places Kotlin is, and split across two dep names for the same reason: a plugin id in the example's settings.gradle.kts, a buildscript classpath coordinate in android/build.gradle.kts. Without this, an AGP release arrives as the pair of PRs #6 and #7 were. Unlike the Kotlin rule above, this one is not a stopgap: the built-in-Kotlin migration retires the second Kotlin declaration, not the second AGP one, so the split is permanent under this layout.",
+            "matchManagers": ["gradle"],
+            "matchPackageNames": ["/^com\\.android\\./"],
+            "groupName": "Android Gradle Plugin",
+            "groupSlug": "agp"
+        },
+        {
             "description": "Native updates are now compiled on both sides — the example's Android build in `validation`, its iOS build in `ios_validation` — so these are covered by a compile rather than only by review. They stay in front of a human anyway: the example is the only thing that builds this code, it exercises one configuration rather than every consumer's, and a native break in a published SDK reaches consumers through a release. Revisit if that ever feels like more friction than it buys.",
             "matchManagers": ["gradle", "gradle-wrapper", "cocoapods"],
             "automerge": false,

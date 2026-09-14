@@ -103,7 +103,21 @@ jobs:
                     exit 0
                   fi
 
-                  CHANGED=$(git diff --name-only "$BASE" HEAD)
+                  # Three dots, not two: $BASE is the base branch's tip at
+                  # event time, not the merge base. A two-dot diff reports
+                  # differences in both directions, so once any iOS-touching PR
+                  # merges, every other open PR would see ios/ as changed until
+                  # it rebased — and the filter would stop filtering. Three dots
+                  # diff from the merge base, which is what "what did this
+                  # branch change" means. On a push $BASE is already an ancestor
+                  # of HEAD, so the two forms agree there.
+                  if ! MERGE_BASE=$(git merge-base "$BASE" HEAD); then
+                    echo "No merge base with $BASE; running the iOS build."
+                    echo "ios=true" >> "$GITHUB_OUTPUT"
+                    exit 0
+                  fi
+
+                  CHANGED=$(git diff --name-only "$MERGE_BASE" HEAD)
                   echo "Changed files:"
                   echo "$CHANGED" | sed 's/^/  /'
 
@@ -150,12 +164,17 @@ jobs:
               run: flutter build ios --debug --simulator --no-codesign
               working-directory: example
     create_release_version:
-        # `always()` is required because ios_validation is skipped on most
+        # `!cancelled()` is required because ios_validation is skipped on most
         # merges, and a skipped dependency would otherwise skip this job and
         # silently stop cutting releases. The conditions below therefore have to
         # state what is actually wanted: validation passed, and the iOS build
         # did not fail (skipped is fine).
-        if: ${{ always() && github.event_name == 'push' && github.ref_name == 'main' && needs.validation.result == 'success' && needs.detect_ios_changes.result == 'success' && needs.ios_validation.result != 'failure' }}
+        #
+        # It is deliberately not `always()`, which runs even when the whole run
+        # is cancelled: cancelling mid-iOS-build would leave ios_validation at
+        # `cancelled`, which passes `!= 'failure'`, and this job would tag and
+        # publish off a run a human stopped. A publish cannot be taken back.
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref_name == 'main' && needs.validation.result == 'success' && needs.detect_ios_changes.result == 'success' && needs.ios_validation.result != 'failure' }}
         needs: [validation, detect_ios_changes, ios_validation]
         runs-on: ubuntu-latest
         permissions:

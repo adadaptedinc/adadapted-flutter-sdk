@@ -41,13 +41,13 @@ Pre-commit runs format, analyze, the version check and the full test suite, plus
 | --- | --- | --- |
 | `validation` | Linux | Every push and PR. Format, analyze, version check, tests, and the example's **Android** build |
 | `detect_ios_changes` | Linux | PRs and `main`. Diffs the changed paths to decide the next job |
-| `ios_validation` | **macOS** | Only when `ios/`, `example/ios/`, a pubspec or `example/pubspec.lock` changed. Builds the example for the simulator |
+| `ios_validation` | **macOS** | Only when `ios/`, `example/ios/`, a pubspec, `example/pubspec.lock` or `.github/workflows/` changed. Builds the example for the simulator |
 | `create_release_version` | Linux | Pushes to `main`, when the version changed |
 
 Two things about that shape are load-bearing:
 
 - **`ios_validation` is conditional, and is deliberately *not* in the required-checks ruleset.** A required check that sometimes does not run needs the ruleset configured to match it. Wire it in deliberately or leave it out.
-- **`create_release_version` uses `always()`.** `ios_validation` is skipped on most merges, and a skipped dependency would otherwise skip the release job and quietly stop cutting releases. Its condition therefore states what is wanted outright: `validation` succeeded, the detect job succeeded, and the iOS build did not *fail* — skipped being fine.
+- **`create_release_version` uses `!cancelled()`.** `ios_validation` is skipped on most merges, and a skipped dependency would otherwise skip the release job and quietly stop cutting releases. Its condition therefore states what is wanted outright: `validation` succeeded, the detect job succeeded, and the iOS build did not *fail* — skipped being fine. It is **not** `always()`, which runs even when the run is cancelled: a cancel during the macOS build leaves `ios_validation` at `cancelled`, which passes `!= 'failure'`, and the release job would tag and publish off a run a human stopped.
 
 macOS runners bill at roughly ten times the Linux rate, which is the whole reason for the path filter. `detect_ios_changes` also guards against running twice: both `push` and `pull_request` fire for a branch with an open PR, and `validation` wears that duplication on Linux where it is cheap.
 
