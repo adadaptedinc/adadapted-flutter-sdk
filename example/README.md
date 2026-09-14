@@ -14,7 +14,7 @@ Run `flutter doctor` first and resolve anything it flags for the platform you wa
 
 - **Flutter 3.44 or later.**
 - **Android** — Android Studio, and an emulator image that includes **Google Play** or **Google APIs**. See [Advertising identifiers on emulators](#advertising-identifiers-on-emulators) for why the image matters.
-- **iOS** — Xcode, and its command line tools. CocoaPods is needed only if you build the CocoaPods way; Flutter uses Swift Package Manager by default from 3.47.
+- **iOS** — Xcode, its command line tools, and **CocoaPods**. Flutter uses Swift Package Manager by default from 3.47 and every plugin here resolves as a Swift Package, but CocoaPods is still required: this example keeps its CocoaPods integration deliberately, and the sandbox check is part of the Xcode project, so the build fails without it. `flutter doctor` flags it when it is missing.
 
 Then, from this directory:
 
@@ -168,7 +168,9 @@ rm -rf ios/Flutter/ephemeral ios/Pods ios/Podfile.lock
 flutter clean && flutter pub get
 ```
 
-**`All plugins found for ios are Swift Packages, but your project still has CocoaPods integration`** — informational, not an error. The example keeps its `Podfile` deliberately, so the CocoaPods path stays testable; Flutter mentions this on every Swift Package Manager build.
+**`All plugins found for ios are Swift Packages, but your project still has CocoaPods integration`** — informational, not an error, and Flutter prints it on every Swift Package Manager build. Do not follow its `pod deintegrate` suggestion: the example keeps its `Podfile` deliberately so the CocoaPods path a host app may still be on stays testable.
+
+**`The sandbox is not in sync with the Podfile.lock`** or **`CocoaPods not installed or not in valid state`** — CocoaPods is missing or its `Pods/` directory is stale. Install it (`brew install cocoapods`), then `cd ios && pod install`. Deleting the `Podfile` does not avoid this; the check lives in the Xcode project.
 
 **Changes to the SDK are not picked up** — the example depends on `path: ../`, so a hot restart (`R`) usually suffices. After changing Kotlin or Swift, stop and re-run: native code is not hot reloaded.
 
