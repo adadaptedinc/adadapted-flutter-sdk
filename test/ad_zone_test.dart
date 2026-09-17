@@ -3,6 +3,10 @@
 library;
 
 import 'package:adadapted_flutter_sdk/adadapted_flutter_sdk.dart';
+// Not exported from the barrel: the action-path gate is internal, and testing it
+// directly is what keeps the allowlist honest without a url_launcher fake.
+import 'package:adadapted_flutter_sdk/src/components/ad_zone.dart'
+    show resolveActionUrl;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:visibility_detector/visibility_detector.dart';
@@ -1160,6 +1164,87 @@ void main() {
       await settle(tester);
 
       expect(backend.requestsTo('/ad/retrieve').length, 1);
+    });
+
+    testWidgets('still report and refresh for a refused action path', (
+      tester,
+    ) async {
+      backend.responses['/ad/retrieve'] = adResponse(
+        actionType: 'e',
+        actionPath: 'intent://evil#Intent;package=com.example.target;end',
+      );
+
+      await initialize(tester);
+      await pumpZone(tester, const AdZone(zoneId: 'zone-1', isVisible: true));
+      await finishCreative(tester);
+
+      await tester.tapAt(tester.getCenter(find.byType(AdZone)));
+      await settle(tester);
+
+      // The tap happened, so it is reported and the zone moves on, exactly as
+      // when the platform has no handler for the URL. Only the launch is
+      // withheld, which [resolveActionUrl] below covers.
+      expect(backend.reportedAdEvents, contains('interaction'));
+      expect(backend.requestsTo('/ad/retrieve').length, 2);
+    });
+  });
+
+  group('action paths', () {
+    test('allow web URLs', () {
+      expect(
+        resolveActionUrl('https://advertiser.test/landing')?.toString(),
+        'https://advertiser.test/landing',
+      );
+      expect(
+        resolveActionUrl('http://advertiser.test/landing')?.toString(),
+        'http://advertiser.test/landing',
+      );
+    });
+
+    test('allow store URLs', () {
+      expect(
+        resolveActionUrl('market://details?id=com.example')?.scheme,
+        'market',
+      );
+      expect(
+        resolveActionUrl('itms-apps://apps.apple.com/app/id1')?.scheme,
+        'itms-apps',
+      );
+    });
+
+    test('ignore the case of the scheme', () {
+      expect(resolveActionUrl('HTTPS://advertiser.test')?.scheme, 'https');
+    });
+
+    test('trim surrounding whitespace', () {
+      expect(
+        resolveActionUrl('  https://advertiser.test/landing  ')?.toString(),
+        'https://advertiser.test/landing',
+      );
+    });
+
+    test('refuse a scheme that is not on the allowlist', () {
+      // The one that matters: an Android intent URL names a target package and
+      // carries extras into it.
+      expect(
+        resolveActionUrl('intent://evil#Intent;package=com.example.target;end'),
+        isNull,
+      );
+      expect(resolveActionUrl('javascript:alert(1)'), isNull);
+      expect(resolveActionUrl('file:///etc/passwd'), isNull);
+      expect(resolveActionUrl('tel:+15555550100'), isNull);
+    });
+
+    test('refuse a path with no scheme at all', () {
+      expect(resolveActionUrl('advertiser.test/landing'), isNull);
+      expect(resolveActionUrl('/landing'), isNull);
+      expect(resolveActionUrl(''), isNull);
+    });
+
+    test('refuse a path that does not parse', () {
+      // Uri.parse would throw FormatException here, synchronously, inside the
+      // gesture handler.
+      expect(resolveActionUrl('https://[oops'), isNull);
     });
   });
 

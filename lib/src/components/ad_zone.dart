@@ -9,6 +9,7 @@ library;
 import 'dart:async';
 
 import 'package:clock/clock.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:visibility_detector/visibility_detector.dart';
@@ -38,6 +39,43 @@ const double defaultXyDragDistanceAllowed = 25;
 /// Not a render failure: it is what a zone's own next `loadRequest` does to the
 /// load before it.
 const int _urlCancelledErrorCode = -999;
+
+/// The URL schemes an ad's `action_path` is allowed to open.
+///
+/// The ad server is trusted, but it is not a boundary a partner should have to
+/// take on faith: an `action_path` is server-supplied content reaching
+/// [LaunchMode.externalApplication], and on Android an `intent://` URL can name
+/// a target package and carry extras into it. Restricting the scheme keeps the
+/// only thing a tap can do the thing the ad type says it does — open a web page,
+/// or a store listing.
+const Set<String> _allowedActionSchemes = <String>{
+  'https',
+  'http',
+  // The Play Store and the App Store, for an external ad pointing at an app
+  // listing rather than a web page.
+  'market',
+  'itms-apps',
+  'itms-appss',
+};
+
+/// Resolves an ad's `action_path` to a URL that is safe to open.
+///
+/// Null when the path does not parse, carries no scheme, or names a scheme
+/// outside [_allowedActionSchemes]. `Uri.parse` is deliberately not used: it
+/// throws `FormatException` synchronously on a malformed path, which would
+/// escape into whichever gesture handler is running rather than being contained
+/// the way a failed launch is.
+/// @param actionPath - The `action_path` served with the ad.
+/// @returns the URL to open, or null when it must not be opened.
+Uri? resolveActionUrl(String actionPath) {
+  final url = Uri.tryParse(actionPath.trim());
+
+  if (url == null || !url.hasScheme) {
+    return null;
+  }
+
+  return _allowedActionSchemes.contains(url.scheme.toLowerCase()) ? url : null;
+}
 
 /// Injected into the creative once it has rendered and is on screen, immediately
 /// before the impression is reported. The creative is expected to define this
@@ -620,9 +658,11 @@ class _AdZoneState extends State<AdZone> {
       _webViewController?.runJavaScript(pixelTrackingJs).catchError((
         Object error,
       ) {
-        debugPrint(
-          'Unable to inject the tracking pixels for ad "${ad.id}". $error',
-        );
+        if (kDebugMode) {
+          debugPrint(
+            'Unable to inject the tracking pixels for ad "${ad.id}". $error',
+          );
+        }
       }),
     );
 
@@ -1194,22 +1234,37 @@ class _AdZoneState extends State<AdZone> {
 
       _reportEvent(ReportedEventType.interaction, ad: selectedAd);
 
-      // Fails when the platform has no handler for the URL, which is the ad's
-      // content rather than anything the SDK controls. The interaction above is
-      // already reported, so this only needs to not surface as an unhandled
-      // error.
-      unawaited(
-        launchUrl(
-          Uri.parse(selectedAd.actionPath),
-          mode: LaunchMode.externalApplication,
-        ).catchError((Object error) {
-          debugPrint(
-            'Unable to open the URL for ad "${selectedAd.id}". $error',
-          );
+      final actionUrl = resolveActionUrl(selectedAd.actionPath);
 
-          return false;
-        }),
-      );
+      if (actionUrl == null) {
+        // The tap happened and is reported above, exactly as it is when the
+        // platform has no handler for the URL. What the zone will not do is
+        // hand an unrecognised scheme to the platform.
+        if (kDebugMode) {
+          debugPrint(
+            'Refusing to open the action path for ad "${selectedAd.id}": '
+            'it is not a valid https, http or store URL.',
+          );
+        }
+      } else {
+        // Fails when the platform has no handler for the URL, which is the ad's
+        // content rather than anything the SDK controls. The interaction above
+        // is already reported, so this only needs to not surface as an
+        // unhandled error.
+        unawaited(
+          launchUrl(actionUrl, mode: LaunchMode.externalApplication).catchError(
+            (Object error) {
+              if (kDebugMode) {
+                debugPrint(
+                  'Unable to open the URL for ad "${selectedAd.id}". $error',
+                );
+              }
+
+              return false;
+            },
+          ),
+        );
+      }
     } else if (selectedAd.actionType == AdActionType.content &&
         selectedAd.payload.detailedListItems != null) {
       wasHandled = true;
