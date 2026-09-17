@@ -3,6 +3,10 @@
 library;
 
 import 'package:adadapted_flutter_sdk/adadapted_flutter_sdk.dart';
+// Not exported from the barrel: the action-path gate is internal, and testing it
+// directly is what keeps the allowlist honest without a url_launcher fake.
+import 'package:adadapted_flutter_sdk/src/components/ad_zone.dart'
+    show resolveActionUrl;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:visibility_detector/visibility_detector.dart';
@@ -537,6 +541,52 @@ void main() {
           .firstWhere((e) => e['event_type'] == 'zone_unfilled');
 
       expect(event['event_name'], 'render_failed');
+    });
+
+    testWidgets('report render_failed for a creative_url that will not parse', (
+      tester,
+    ) async {
+      // `Uri.parse` threw from inside [_displayAd], past the `try` in
+      // [_fetchAd], so nothing was reported to the host or the API and the zone
+      // was left with no refresh countdown to try again with.
+      backend.responses['/ad/retrieve'] = adResponse(
+        creativeUrl: 'https://[oops',
+      );
+
+      var loadFailed = false;
+      final hasAdsCalls = <bool>[];
+
+      await initialize(tester);
+      await pumpZone(
+        tester,
+        AdZone(
+          zoneId: 'zone-1',
+          isVisible: true,
+          onAdLoadFailed: () => loadFailed = true,
+          onZoneHasAds: hasAdsCalls.add,
+        ),
+      );
+      await settle(tester);
+
+      final event = backend
+          .requestsTo('/ad/events')
+          .expand((r) => r.events)
+          .firstWhere((e) => e['event_type'] == 'zone_unfilled');
+
+      expect(event['event_name'], 'render_failed');
+      expect(loadFailed, isTrue);
+
+      // Filled, then unfilled. Failing inline instead of on a microtask
+      // reverses these, which leaves the host with a collapsed zone it has been
+      // told has an ad, and no further call when the zone genuinely unfills.
+      expect(hasAdsCalls, <bool>[true, false]);
+
+      // The countdown survived, so the zone asks again rather than sitting dead
+      // for the rest of the session.
+      await tester.pump(const Duration(seconds: 61));
+      await settle(tester);
+
+      expect(backend.requestsTo('/ad/retrieve').length, greaterThan(1));
     });
 
     testWidgets('report render_failed when the creative errors', (
@@ -1160,6 +1210,87 @@ void main() {
       await settle(tester);
 
       expect(backend.requestsTo('/ad/retrieve').length, 1);
+    });
+
+    testWidgets('still report and refresh for a refused action path', (
+      tester,
+    ) async {
+      backend.responses['/ad/retrieve'] = adResponse(
+        actionType: 'e',
+        actionPath: 'intent://evil#Intent;package=com.example.target;end',
+      );
+
+      await initialize(tester);
+      await pumpZone(tester, const AdZone(zoneId: 'zone-1', isVisible: true));
+      await finishCreative(tester);
+
+      await tester.tapAt(tester.getCenter(find.byType(AdZone)));
+      await settle(tester);
+
+      // The tap happened, so it is reported and the zone moves on, exactly as
+      // when the platform has no handler for the URL. Only the launch is
+      // withheld, which [resolveActionUrl] below covers.
+      expect(backend.reportedAdEvents, contains('interaction'));
+      expect(backend.requestsTo('/ad/retrieve').length, 2);
+    });
+  });
+
+  group('action paths', () {
+    test('allow web URLs', () {
+      expect(
+        resolveActionUrl('https://advertiser.test/landing')?.toString(),
+        'https://advertiser.test/landing',
+      );
+      expect(
+        resolveActionUrl('http://advertiser.test/landing')?.toString(),
+        'http://advertiser.test/landing',
+      );
+    });
+
+    test('allow store URLs', () {
+      expect(
+        resolveActionUrl('market://details?id=com.example')?.scheme,
+        'market',
+      );
+      expect(
+        resolveActionUrl('itms-apps://apps.apple.com/app/id1')?.scheme,
+        'itms-apps',
+      );
+    });
+
+    test('ignore the case of the scheme', () {
+      expect(resolveActionUrl('HTTPS://advertiser.test')?.scheme, 'https');
+    });
+
+    test('trim surrounding whitespace', () {
+      expect(
+        resolveActionUrl('  https://advertiser.test/landing  ')?.toString(),
+        'https://advertiser.test/landing',
+      );
+    });
+
+    test('refuse a scheme that is not on the allowlist', () {
+      // The one that matters: an Android intent URL names a target package and
+      // carries extras into it.
+      expect(
+        resolveActionUrl('intent://evil#Intent;package=com.example.target;end'),
+        isNull,
+      );
+      expect(resolveActionUrl('javascript:alert(1)'), isNull);
+      expect(resolveActionUrl('file:///etc/passwd'), isNull);
+      expect(resolveActionUrl('tel:+15555550100'), isNull);
+    });
+
+    test('refuse a path with no scheme at all', () {
+      expect(resolveActionUrl('advertiser.test/landing'), isNull);
+      expect(resolveActionUrl('/landing'), isNull);
+      expect(resolveActionUrl(''), isNull);
+    });
+
+    test('refuse a path that does not parse', () {
+      // Uri.parse would throw FormatException here, synchronously, inside the
+      // gesture handler.
+      expect(resolveActionUrl('https://[oops'), isNull);
     });
   });
 

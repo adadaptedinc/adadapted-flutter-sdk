@@ -83,8 +83,15 @@ class AdadaptedFlutterSdkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler
         try {
             val gaidInfo = AdvertisingIdClient.getAdvertisingIdInfo(applicationContext)
 
-            gaid = gaidInfo.id ?: ""
             adTrackingEnabled = !gaidInfo.isLimitAdTrackingEnabled
+
+            // Only when the user has not opted out. Play Services zeroes the identifier
+            // itself from Android 12, but below that it hands back the real one with the
+            // flag set beside it, and sending that on is a Play policy violation that
+            // attaches to the host app's listing. minSdk is 24, so that range is live.
+            // Empty rather than substituted, which is what the iOS side does when
+            // tracking has not been permitted.
+            gaid = if (adTrackingEnabled) gaidInfo.id ?: "" else ""
         } catch (ex: Exception) {
             // Play Services missing, out of date, or unavailable on this device. The
             // identifier is left empty rather than substituted, which is the same choice

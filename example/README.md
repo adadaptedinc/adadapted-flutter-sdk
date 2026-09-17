@@ -112,7 +112,7 @@ This example only has `android/` and `ios/` platform folders. If a desktop or we
 - **Session** — an ID beginning `FL`, available as soon as `initialize()` resolves. It is generated on device and never persisted, so it changes on every cold start.
 - **Device ID** — the advertising identifier, and it differs by platform on purpose:
     - **Android emulator** — a real Google advertising ID from Play Services, e.g. `b4fbbfe6-cea2-48de-b656-787896e75329`.
-    - **iOS simulator** — `FLUTTER-TEST-ADVERTISER-ID`, the custom `advertiserId` the demo passes to `initialize()`.
+    - **iOS simulator** — empty. The simulator has no IDFA to hand out, and the demo passes no `advertiserId` override.
 
   See [Advertising identifiers on emulators](#advertising-identifiers-on-emulators) for why the two disagree.
 - **The ad zone** — collapsed until an ad arrives, then 250pt tall. Tapping an add-to-list ad appends its items to the list at the bottom of the screen.
@@ -145,17 +145,17 @@ curl -s -X POST https://sandbox.adadapted.com/v/1.0.0/ad/retrieve \
 
 Where there is no identifier the SDK reports an empty string rather than substituting something else — on both platforms, deliberately. Verify anything that depends on a *production* identifier — attribution, retargeting — on physical hardware.
 
-### Why iOS shows an ID here anyway
+### Overriding the identifier
 
-`initialize()` takes an optional `advertiserId` that replaces the IDFA, and the demo passes one:
+`initialize()` takes an optional `advertiserId` that replaces the IDFA. It is **iOS only**, matching the other AdAdapted SDKs, and the demo deliberately does **not** pass one, so what you see is what the device actually reports.
 
-```dart
-advertiserId: 'FLUTTER-TEST-ADVERTISER-ID',
-```
+Do not copy a literal into a real integration. A hardcoded `advertiserId` ships one advertising ID for that app's entire user base, and every event from every install is attributed to the same non-user.
 
-That override is **iOS only**, matching the other AdAdapted SDKs, which is exactly why the same build shows `FLUTTER-TEST-ADVERTISER-ID` on the simulator and the platform's own GAID on the Android emulator. Delete the line in `lib/main.dart` to exercise the real IDFA path.
+### App Tracking Transparency
 
-The example declares `NSUserTrackingUsageDescription` in `ios/Runner/Info.plist`, which is what a real integration needs before it can prompt.
+The demo asks for tracking authorization **before** `initialize()`, in `_requestTrackingAuthorization()`, because the SDK reads the status once while it gathers device info — a permission granted afterwards is not picked up until the next `initialize()`. It uses the [`app_tracking_transparency`](https://pub.dev/packages/app_tracking_transparency) package, and the prompt needs `NSUserTrackingUsageDescription` in `ios/Runner/Info.plist`, which the example declares.
+
+On the simulator there is nothing behind that permission, so the identifier reads empty however the prompt is answered.
 
 ---
 

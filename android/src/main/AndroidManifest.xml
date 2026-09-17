@@ -1,5 +1,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!--
+        Every ad request, creative load and event report goes over the network, and the
+        plugin cannot assume the host declares this. Flutter's app template puts INTERNET
+        in the debug and profile manifests only, so a host app that makes no network calls
+        of its own works in every test build and serves nothing in the store build.
+        Declaring it here merges it into the release manifest too.
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!--
         Lets the Advertising ID be read on Android 13 and above. Without it Play Services
         returns a zeroed identifier and every event is attributed to the same non-user.
     -->

@@ -28,6 +28,12 @@ let package = Package(
             name: "adadapted_flutter_sdk",
             dependencies: [
                 .product(name: "FlutterFramework", package: "FlutterFramework")
+            ],
+            // The privacy manifest Apple requires of a third-party tracking SDK.
+            // The podspec declares the same file as a resource bundle, so it
+            // reaches the app either way it is integrated.
+            resources: [
+                .process("PrivacyInfo.xcprivacy")
             ]
         )
     ]
