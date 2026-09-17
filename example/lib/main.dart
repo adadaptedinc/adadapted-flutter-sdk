@@ -5,7 +5,10 @@
 /// its countdown and its impressions can be watched pausing and resuming.
 library;
 
+import 'dart:io';
+
 import 'package:adadapted_flutter_sdk/adadapted_flutter_sdk.dart';
+import 'package:app_tracking_transparency/app_tracking_transparency.dart';
 import 'package:flutter/material.dart';
 
 /// The app ID this demo serves ads for.
@@ -66,14 +69,43 @@ class _DemoAppState extends State<DemoApp> {
     super.dispose();
   }
 
+  /// Asks for App Tracking Transparency, on iOS, before the SDK is started.
+  ///
+  /// Order matters and this is the whole reason it has its own method: the SDK
+  /// reads the tracking status once, while it gathers device info inside
+  /// [AdadaptedFlutterSdk.initialize], so a permission granted after that call
+  /// is not picked up until the next one. Requesting it here means the answer is
+  /// already in place.
+  ///
+  /// [AppTrackingTransparency.requestTrackingAuthorization] is a no-op once the
+  /// user has answered, so calling it on every launch is safe; the dialog is
+  /// shown at most once. It needs `NSUserTrackingUsageDescription` in
+  /// `ios/Runner/Info.plist` or it cannot prompt at all.
+  Future<void> _requestTrackingAuthorization() async {
+    if (!Platform.isIOS) {
+      return;
+    }
+
+    final status = await AppTrackingTransparency.trackingAuthorizationStatus;
+
+    if (status == TrackingStatus.notDetermined) {
+      await AppTrackingTransparency.requestTrackingAuthorization();
+    }
+  }
+
   /// Starts the SDK and records the session it minted.
   Future<void> _initializeSdk() async {
     try {
+      await _requestTrackingAuthorization();
+
       await _sdk.initialize(
         appId: demoAppId,
         apiEnv: ApiEnv.dev,
-        // Optional custom advertiser ID — remove to use the IDFA instead.
-        advertiserId: 'FLUTTER-TEST-ADVERTISER-ID',
+        // No advertiserId. The demo deliberately does not pass one, so it reports
+        // whatever the device actually has: the IDFA on iOS once tracking has
+        // been permitted, the GAID on Android. A hardcoded value here would be
+        // copied into a real integration, where it reports one advertising ID for
+        // that app's entire user base.
         xyDragDistanceAllowed: 30,
         onAddToListTriggered: (items) {
           for (final item in items) {
