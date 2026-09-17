@@ -12,6 +12,10 @@ Integrates the AdAdapted ad platform into a Flutter app.
   # The same sources Package.swift builds, so CocoaPods and Swift Package
   # Manager integrations stay in step with one copy of the plugin.
   s.source_files     = 'adadapted_flutter_sdk/Sources/adadapted_flutter_sdk/**/*.swift'
+  # Apple requires a third-party SDK that tracks to ship its own privacy manifest,
+  # and it has to reach the app as a resource bundle rather than a loose file.
+  # Package.swift declares the same one for Swift Package Manager integrations.
+  s.resource_bundles = { 'adadapted_flutter_sdk_privacy' => ['adadapted_flutter_sdk/Sources/adadapted_flutter_sdk/PrivacyInfo.xcprivacy'] }
   s.dependency 'Flutter'
   s.platform = :ios, '12.0'
 
