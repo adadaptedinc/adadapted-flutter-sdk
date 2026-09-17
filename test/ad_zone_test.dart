@@ -543,6 +543,52 @@ void main() {
       expect(event['event_name'], 'render_failed');
     });
 
+    testWidgets('report render_failed for a creative_url that will not parse', (
+      tester,
+    ) async {
+      // `Uri.parse` threw from inside [_displayAd], past the `try` in
+      // [_fetchAd], so nothing was reported to the host or the API and the zone
+      // was left with no refresh countdown to try again with.
+      backend.responses['/ad/retrieve'] = adResponse(
+        creativeUrl: 'https://[oops',
+      );
+
+      var loadFailed = false;
+      final hasAdsCalls = <bool>[];
+
+      await initialize(tester);
+      await pumpZone(
+        tester,
+        AdZone(
+          zoneId: 'zone-1',
+          isVisible: true,
+          onAdLoadFailed: () => loadFailed = true,
+          onZoneHasAds: hasAdsCalls.add,
+        ),
+      );
+      await settle(tester);
+
+      final event = backend
+          .requestsTo('/ad/events')
+          .expand((r) => r.events)
+          .firstWhere((e) => e['event_type'] == 'zone_unfilled');
+
+      expect(event['event_name'], 'render_failed');
+      expect(loadFailed, isTrue);
+
+      // Filled, then unfilled. Failing inline instead of on a microtask
+      // reverses these, which leaves the host with a collapsed zone it has been
+      // told has an ad, and no further call when the zone genuinely unfills.
+      expect(hasAdsCalls, <bool>[true, false]);
+
+      // The countdown survived, so the zone asks again rather than sitting dead
+      // for the rest of the session.
+      await tester.pump(const Duration(seconds: 61));
+      await settle(tester);
+
+      expect(backend.requestsTo('/ad/retrieve').length, greaterThan(1));
+    });
+
     testWidgets('report render_failed when the creative errors', (
       tester,
     ) async {

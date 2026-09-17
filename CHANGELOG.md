@@ -31,6 +31,12 @@ this as a release.
 - **The two `debugPrint` calls in `ad_zone.dart` are behind `kDebugMode`**, as
   the SDK's own logger already was, so ad IDs and platform errors stay out of
   release logs.
+- **A `creative_url` that will not parse fails the zone instead of killing it.**
+  `Uri.parse` threw `FormatException` synchronously from `_loadCreative`, past
+  the `try` in `_fetchAd` and before `_displayAd` had armed the refresh
+  countdown, so one malformed value left the zone with no ad, no timer and
+  nothing to wake it — reporting nothing to the host or the API. It is now
+  reported as `render_failed` like any other creative that will not display.
 
 ### Added
 

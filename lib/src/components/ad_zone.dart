@@ -1057,15 +1057,39 @@ class _AdZoneState extends State<AdZone> {
   void _loadCreative(Ad ad) {
     final controller = _webViewController ??= _buildWebViewController();
 
+    final creativeUrl = Uri.tryParse(ad.creativeUrl);
+
+    if (creativeUrl == null) {
+      // `Uri.parse` threw `FormatException` from here, synchronously: it is an
+      // argument, so it was raised before `loadRequest` returned a future and
+      // the handler below could never see it. This method is reached from
+      // [_displayAd] through [_setCurrentAd], which is past the `try` in
+      // [_fetchAd], so the throw escaped as an unhandled async error and took
+      // the rest of [_displayAd] with it — including the [_restartTimer] that
+      // is placed there so a later failure cannot leave the zone without a
+      // countdown. One malformed `creative_url` left the zone with no ad, no
+      // timer and nothing to wake it, and reported nothing to either the host
+      // or the API.
+      //
+      // Deferred rather than failed inline, because [_onCreativeFailed] calls
+      // [_displayAd] itself: re-entering it here would report the zone unfilled
+      // and then let the outer call report it filled, leaving the host with a
+      // collapsed zone it believes has an ad. A microtask lands after the outer
+      // call has finished, which is where an asynchronous render failure
+      // already arrives from.
+      scheduleMicrotask(_onCreativeFailed);
+
+      return;
+    }
+
     // Always issued, even for a creative_url the web view is already showing.
     // Two ads rotating through the same creative is routine, and the impression
     // is owed on the load event, so a navigation that was skipped as redundant
     // would cost that ad its impression entirely.
     unawaited(
-      controller.loadRequest(Uri.parse(ad.creativeUrl)).catchError((Object _) {
-        // A creative URL the platform cannot parse or reach never raises a load
-        // event, so it is failed here rather than left to hang until the next
-        // refresh.
+      controller.loadRequest(creativeUrl).catchError((Object _) {
+        // A creative URL the platform cannot reach never raises a load event,
+        // so it is failed here rather than left to hang until the next refresh.
         _onCreativeFailed();
       }),
     );
