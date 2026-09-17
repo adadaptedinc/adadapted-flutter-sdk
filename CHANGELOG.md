@@ -4,6 +4,48 @@ All notable changes to this project are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and its releases are cut from
 [Conventional Commits](https://www.conventionalcommits.org/).
 
+## Unreleased
+
+Compliance and release-blocker fixes from the first partner integration review.
+No API change. Bump `pubspec.yaml` and `lib/src/version.dart` together to cut
+this as a release.
+
+### Fixed
+
+- **Android honors the limit-ad-tracking flag.** Play Services returns the real
+  advertising ID with `isLimitAdTrackingEnabled` set on API 24–30, and the plugin
+  forwarded it. It now reports an empty identifier whenever the flag is set,
+  matching what the iOS side already did on an ATT denial. Sending it was a Play
+  policy violation that attached to the host app's listing.
+- **`android.permission.INTERNET` is declared by the plugin.** Flutter's app
+  template declares it in the debug and profile manifests only, so a host app
+  making no network calls of its own served ads in every test build and nothing
+  in the store build.
+- **An ad's `action_path` is restricted to `https`, `http` and store schemes.**
+  A server-supplied URL reached `LaunchMode.externalApplication` unvalidated,
+  which on Android let an `intent://` path name a target package and carry extras
+  into it. A refused path reports the interaction and refreshes the zone exactly
+  as a failed launch does; only the launch is withheld. `Uri.tryParse` also
+  replaces `Uri.parse`, which threw synchronously out of the gesture handler on a
+  malformed path.
+- **The two `debugPrint` calls in `ad_zone.dart` are behind `kDebugMode`**, as
+  the SDK's own logger already was, so ad IDs and platform errors stay out of
+  release logs.
+
+### Added
+
+- **`ios/.../PrivacyInfo.xcprivacy`**, declared by both the podspec and
+  `Package.swift`. Apple requires a third-party tracking SDK to ship one, and its
+  absence made every partner reconstruct the SDK's data practices from source.
+  `NSPrivacyTrackingDomains` is deliberately empty; see the comment in the file.
+
+### Changed
+
+- **The example app requests App Tracking Transparency before `initialize()`**,
+  using `app_tracking_transparency`, and no longer passes a hardcoded
+  `advertiserId`. It is the only runnable reference partners have, and a literal
+  copied from it ships one advertising ID for an entire user base.
+
 ## 0.1.2
 
 No change to the library. The only published files that differ from 0.1.1 are
